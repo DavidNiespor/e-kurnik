@@ -27,4 +27,4 @@ jobs:
           context: .
           platforms: linux/arm64 # Ważne dla Raspberry Pi!
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/davidniespor/e-kurnik:latest
