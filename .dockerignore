@@ -1,0 +1,14 @@
+*.db
+*.db-shm
+*.db-wal
+*.log
+__pycache__/
+*.pyc
+.git/
+.github/
+.env
+*.env
+google_sa*.json
+*.pem
+deploy.log
+.DS_Store

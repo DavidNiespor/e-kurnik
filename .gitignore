@@ -1,0 +1,13 @@
+*.db
+*.db-shm
+*.db-wal
+*.log
+deploy.log
+.env
+*.env
+google_sa*.json
+*.pem
+*.key
+__pycache__/
+*.pyc
+.DS_Store
