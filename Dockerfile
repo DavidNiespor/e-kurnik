@@ -6,12 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Kopiujemy requirements i instalujemy (kropka po spacji!)
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Używamy cudzysłowów, aby parser nie miał wątpliwości co do argumentów
+COPY "requirements.txt" "/app/requirements.txt"
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Kopiujemy resztę plików (kropka, spacja, kropka!)
-COPY . /app/
+# Kopiujemy wszystko z kontekstu do /app/
+COPY "." "/app/"
 
 RUN mkdir -p /data && chmod 777 /data
 
@@ -20,4 +20,5 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
-CMD ["python3", "app.py"]
+# Używamy pełnej ścieżki do pliku
+CMD ["python3", "/app/app.py"]
