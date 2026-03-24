@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Kopiujemy requirements i instalujemy (kropka po spacji!)
-COPY requirements.txt .
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Kopiujemy resztę plików (kropka, spacja, kropka!)
-COPY . .
+COPY . /app/
 
 RUN mkdir -p /data && chmod 777 /data
 
