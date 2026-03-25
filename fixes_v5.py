@@ -609,7 +609,6 @@ def register_fixes(app):
             pass  # już istnieje
         db.commit(); db.close()
 
-    with app.app_context():
-        _init_new_tables()
+    _init_new_tables()
 
     return app

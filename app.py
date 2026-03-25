@@ -1446,21 +1446,29 @@ def admin_config():
     flash("Konfiguracja zapisana.")
     return redirect("/admin")
 
-# ─── REJESTRACJA MODUŁÓW ─────────────────────────────────────────────────────
+# ─── REJESTRACJA MODUŁÓW (route'y tylko — bez init DB) ──────────────────────
 register_fixes(app)
 register_dashboard_fixes(app)
 register_v5(app)
 register_supla_routes(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+def startup():
+    """Inicjalizacja przy starcie — wywołana raz po załadowaniu Flask."""
     init_db()
     init_auth()
-    # Inicjalizacja bazy składników paszowych
     db = get_db()
+    # Tabele dodatkowe
+    from baza_skladnikow import init_skladniki_tables, seed_skladniki
     init_skladniki_tables(db)
     seed_skladniki(db)
+    from supla_handler import init_supla_tables
+    init_supla_tables(db)
+    db.commit()
     db.close()
+
+if __name__ == "__main__":
+    startup()
     print("\n" + "="*54)
     print("  FERMA JAJ SaaS v5 — multi-tenant")
     print("  http://localhost:5000")

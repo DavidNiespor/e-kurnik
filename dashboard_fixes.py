@@ -76,8 +76,7 @@ def register_dashboard_fixes(app):
                 pass
         db.commit(); db.close()
 
-    with app.app_context():
-        _init()
+    _init()
 
     # ══════════════════════════════════════════════════════════════════════
     # 1. DASHBOARD — szybki wpis z opcją sprzedaży do klienta/zamówienia

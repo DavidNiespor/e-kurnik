@@ -348,9 +348,5 @@ def register_supla_routes(app):
         return redirect("/supla")
 
     # ── init tabel przy starcie ────────────────────────────────────────────
-    with app.app_context():
-        db = get_db()
-        init_supla_tables(db)
-        db.close()
 
     return app
