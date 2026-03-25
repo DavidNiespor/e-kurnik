@@ -28,6 +28,7 @@ from fixes_v5 import register_fixes
 from dashboard_fixes import register_dashboard_fixes
 from routes_v5 import register_v5
 from supla_handler import register_supla_routes
+from fixes_v6 import register_v6
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -378,6 +379,71 @@ def health():
     return jsonify({"status":"ok","time":datetime.now().isoformat()})
 
 # ─── DASHBOARD ────────────────────────────────────────────────────────────────
+# ─── HELPER: kafelki czynności dla dashboardu ─────────────────────────────────
+_CZYN_DEF = [
+    ("poidla","Poidła","💧"),("karmidla","Karmidła","🌾"),("pasza","Pasza","🌽"),
+    ("jaja","Jaja","🥚"),("scioka","Ściółka","🏚"),("leki","Witaminy","💊"),
+    ("bramka","Bramka","🚪"),("posprzatan","Sprzątanie","🧹"),
+]
+
+def _kafelki_czynnosci(g, db_cz=None):
+    if db_cz is None:
+        db_cz = get_db()
+    d = date.today().isoformat()
+    wpis = db_cz.execute(
+        "SELECT czynnosci FROM dzienne_czynnosci WHERE gospodarstwo_id=? AND data=?",
+        (g, d)
+    ).fetchone()
+    db_cz.close()
+    zaznaczone = json.loads(wpis["czynnosci"]) if wpis else []
+    n_ok  = len(zaznaczone)
+    n_all = len(_CZYN_DEF)
+    pct   = round(n_ok / n_all * 100) if n_all else 0
+    kolor = "#3B6D11" if pct >= 80 else "#BA7517" if pct >= 50 else "#A32D2D"
+
+    tiles = ""
+    for k, l, ico in _CZYN_DEF:
+        on = k in zaznaczone
+        chk = "checked" if on else ""
+        cls = "tile tile-on" if on else "tile"
+        onchange = "this.closest('label').classList.toggle('tile-on',this.checked)"
+        tiles += (
+            f'<label style="cursor:pointer">'
+            f'<input type="checkbox" name="cz" value="{k}" {chk}'
+            f' style="display:none" onchange="{onchange}">'
+            f'<div class="{cls}">'
+            f'<div style="font-size:22px;line-height:1">{ico}</div>'
+            f'<div style="font-size:11px;font-weight:500;margin-top:4px">{l}</div>'
+            f'</div></label>'
+        )
+
+    bar_style = (
+        f'width:{pct}%;background:{kolor};'
+        'height:100%;border-radius:4px;transition:width .3s'
+    )
+    return (
+        '<style>'
+        '.tile{border:2px solid #e0ddd4;border-radius:12px;padding:10px 6px;text-align:center;'
+        'background:#fff;transition:border-color .15s,background .15s;min-height:72px;'
+        'display:flex;flex-direction:column;align-items:center;justify-content:center}'
+        '.tile-on{border-color:#3B6D11!important;background:#EAF3DE!important}'
+        '.tiles-g{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}'
+        '@media(max-width:700px){.tiles-g{grid-template-columns:repeat(4,1fr)}}'
+        '</style>'
+        f'<div class="card" style="margin-bottom:10px">'
+        f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
+        f'<b>Czynności dzienne</b>'
+        f'<div style="flex:1;background:#e0ddd4;border-radius:4px;height:6px">'
+        f'<div style="{bar_style}"></div></div>'
+        f'<span style="font-size:13px;color:{kolor};font-weight:500">{n_ok}/{n_all}</span>'
+        f'</div>'
+        f'<form method="POST" action="/dashboard-czynnosci">'
+        f'<div class="tiles-g">{tiles}</div>'
+        f'<button type="submit" class="btn bg bsm" style="margin-top:10px;width:100%">Zapisz</button>'
+        f'</form></div>'
+    )
+
+
 @app.route("/")
 @farm_required
 def dashboard():
@@ -434,6 +500,7 @@ def dashboard():
         '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
         '</div>'
         + (('<div class="card"><b>Urządzenia</b><div class="g4" style="margin-top:10px">' + urz_html + '</div></div>') if urz_html else "")
+        + _kafelki_czynnosci(g, db_cz)
         + '<div class="card"><b>Szybki wpis — dziś</b>'
         + ('<span style="font-size:12px;color:#3B6D11;margin-left:8px">wpisano: ' + str(dzis["jaja_zebrane"]) + ' jaj</span>' if dzis else "")
         + '<form method="POST" action="/produkcja/dodaj" style="margin-top:10px">'
@@ -1451,6 +1518,7 @@ register_fixes(app)
 register_dashboard_fixes(app)
 register_v5(app)
 register_supla_routes(app)
+register_v6(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 def startup():
