@@ -1,14 +1,10 @@
-# Ferma Jaj SaaS — kompletny stack
-# Dodaj przez Portainer: Stacks → Add stack → wklej lub wskaż repo
-#
-# Wymagane zmienne środowiskowe (Portainer → stack → env):
-#   CLOUDFLARE_TUNNEL_TOKEN  — token tunelu z Cloudflare Zero Trust
-#   SECRET_KEY               — losowy ciąg 32+ znaków (sesje Flask)
-#   GH_IMAGE                 — np. ghcr.io/twoj_user/ferma-jaj:latest
+# docker-compose.yml — Portainer Stack
+# Zmienne środowiskowe do ustawienia w Portainer → Stack → Environment variables:
+#   GH_IMAGE                 = ghcr.io/TWOJ_USER/ferma-jaj:latest
+#   SECRET_KEY               = losowy ciąg 32+ znaków
+#   CLOUDFLARE_TUNNEL_TOKEN  = token z Cloudflare Zero Trust
 
 services:
-
-  # ── Aplikacja główna ──────────────────────────────────────────────────────
   ferma:
     image: ${GH_IMAGE:-ghcr.io/changeme/ferma-jaj:latest}
     container_name: ferma_app
@@ -19,21 +15,19 @@ services:
       - ferma_data:/data
     environment:
       - FERMA_DATA_DIR=/data
-      - SECRET_KEY=${SECRET_KEY:-zmien-mnie-na-losowy-ciag}
+      - SECRET_KEY=${SECRET_KEY:-zmien-mnie}
       - TZ=Europe/Warsaw
     healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - ferma_net
 
-  # ── Cloudflare Tunnel — HTTPS bez otwierania portów ──────────────────────
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: ferma_tunnel
@@ -47,7 +41,6 @@ services:
     networks:
       - ferma_net
 
-  # ── Watchtower — automatyczne aktualizacje z GHCR ─────────────────────────
   watchtower:
     image: containrrr/watchtower:latest
     container_name: ferma_watchtower
@@ -63,7 +56,6 @@ services:
     networks:
       - ferma_net
 
-  # ── Portainer Agent — zarządzanie z Portainer Cloud lub lokalnie ──────────
   portainer_agent:
     image: portainer/agent:latest
     container_name: ferma_portainer_agent

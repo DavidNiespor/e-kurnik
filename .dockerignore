@@ -10,5 +10,5 @@ __pycache__/
 *.env
 google_sa*.json
 *.pem
-deploy.log
 .DS_Store
+ferma_*.tar.gz
