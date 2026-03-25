@@ -6,6 +6,7 @@ Uruchomienie: python3 app.py
 from flask import Flask, request, redirect, flash, session, jsonify, send_file
 from markupsafe import Markup
 from routes_v5 import register_v5
+from fixes_v5 import register_fixes
 from flask import render_template_string
 from datetime import datetime, date, timedelta
 import os, io, json
@@ -90,7 +91,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
 </head>
 <body>
 <nav>
-  <span class="logo">Ferma Jaj</span>
+  <span class="logo">Ferma</span>
   {% if farm_id %}
   <span class="farm-badge">{{ farm_name }}</span>
   <a href="/" class="{{ 'on' if p=='dash' }}">Dashboard</a>
@@ -103,6 +104,10 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
   <a href="/kiosk">Kiosk</a>
   <a href="/pojenie" class="{{ 'on' if p=='gpio' }}">Pojenie</a>
+  <a href="/wyposazenie" class="{{ 'on' if p=='wyp' }}">Wyposażenie</a>
+  <a href="/dzienne-czynnosci">Czynności</a>
+  <a href="/energia">Energia</a>
+  <a href="/pasza/predykcja">Predykcja</a>
   <a href="/gpio/pwm">LED</a>
   <a href="/pasza/analityka">Analityka</a>
   <a href="/import/xlsx">Import</a>
@@ -110,6 +115,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <a href="/wybierz-gospodarstwo" class="{{ 'on' if p=='farms' }}" style="margin-left:auto">Gospodarstwa</a>
   {% if rola == 'superadmin' %}<a href="/admin" class="{{ 'on' if p=='admin' }}">Admin</a>{% endif %}
   <a href="/konto">{{ login }}</a>
+  <a href="/admin/farm-assign">Przypisz farmy</a>
   <a href="/logout">Wyloguj</a>
 </nav>
 <div class="wrap">
@@ -1377,6 +1383,7 @@ def admin_config():
     return redirect("/admin")
 from routes_v5 import register_v5
 register_v5(app)
+register_fixes(app)
 # ─── START ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
