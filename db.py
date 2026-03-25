@@ -260,5 +260,91 @@ def init_db():
     );
     INSERT OR IGNORE INTO system_config VALUES ('app_version','4.0');
     INSERT OR IGNORE INTO system_config VALUES ('rejestracja_otwarta','1');
+
+    -- ── SUPLA ──────────────────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS supla_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        nazwa TEXT NOT NULL,
+        server_url TEXT DEFAULT 'https://svr1.supla.org',
+        token TEXT,
+        channel_id INTEGER,
+        typ TEXT DEFAULT 'webhook',
+        aktywny INTEGER DEFAULT 1
+    );
+    -- ── PWM LED ────────────────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS pwm_led (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER REFERENCES gospodarstwa(id),
+        nazwa TEXT DEFAULT 'LED',
+        pin_bcm INTEGER NOT NULL,
+        jasnosc_pct INTEGER DEFAULT 80,
+        aktywny INTEGER DEFAULT 1
+    );
+    -- ── CZYNNOŚCI DZIENNE ──────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS dzienne_czynnosci (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        data DATE NOT NULL,
+        czynnosci TEXT DEFAULT '[]',
+        notatka TEXT,
+        UNIQUE(gospodarstwo_id, data)
+    );
+    -- ── WODA RĘCZNA Z CENAMI ───────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS woda_reczna (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        data DATE NOT NULL,
+        litry REAL DEFAULT 0,
+        cena_litra REAL DEFAULT 0,
+        koszt REAL DEFAULT 0,
+        uwagi TEXT,
+        UNIQUE(gospodarstwo_id, data)
+    );
+    -- ── SPRZEDAŻ SZCZEGÓŁ ──────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS sprzedaz_szczegol (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id),
+        data DATE NOT NULL,
+        klient_id INTEGER REFERENCES klienci(id),
+        zamowienie_id INTEGER REFERENCES zamowienia(id),
+        ilosc INTEGER NOT NULL,
+        cena_szt REAL DEFAULT 0,
+        wartosc REAL DEFAULT 0,
+        typ TEXT DEFAULT 'gotowka',
+        uwagi TEXT
+    );
+    -- ── SKŁADNIKI BAZA ─────────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS skladniki_baza (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nazwa TEXT NOT NULL UNIQUE,
+        kategoria TEXT DEFAULT 'inne',
+        cena_pln_t REAL DEFAULT 0,
+        jednostka TEXT DEFAULT 'kg',
+        bialko_pct REAL DEFAULT 0,
+        energia_me REAL DEFAULT 0,
+        tluszcz_pct REAL DEFAULT 0,
+        wlokno_pct REAL DEFAULT 0,
+        wapn_g_kg REAL DEFAULT 0,
+        fosfor_g_kg REAL DEFAULT 0,
+        lizyna_g_kg REAL DEFAULT 0,
+        metionina_g_kg REAL DEFAULT 0,
+        uwagi TEXT,
+        aktywny INTEGER DEFAULT 1,
+        data_aktualizacji_ceny DATETIME
+    );
+    -- ── HARMONOGRAM POJENIA ────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS harmonogram_pojenia (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id),
+        nazwa TEXT NOT NULL,
+        urzadzenie_id INTEGER REFERENCES urzadzenia(id),
+        kanal TEXT,
+        czas_otwarcia TEXT,
+        czas_zamkniecia TEXT,
+        czas_trwania_s INTEGER DEFAULT 30,
+        powtarzaj_co_h INTEGER DEFAULT 4,
+        aktywny INTEGER DEFAULT 1
+    );
     """)
     db.commit(); db.close()

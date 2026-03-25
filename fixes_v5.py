@@ -19,7 +19,7 @@ def register_fixes(app):
     # ─── HELPER: wspólny R() działający bez templates.py ─────────────────────
     from flask import render_template_string
     try:
-        from templates import R
+        from app import R
     except ImportError:
         from app import R
 

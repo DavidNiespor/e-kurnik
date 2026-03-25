@@ -5,8 +5,6 @@ Uruchomienie: python3 app.py
 """
 from flask import Flask, request, redirect, flash, session, jsonify, send_file
 from markupsafe import Markup
-from routes_v5 import register_v5
-from fixes_v5 import register_fixes
 from flask import render_template_string
 from datetime import datetime, date, timedelta
 import os, io, json
@@ -23,6 +21,13 @@ from auth import (login_required, farm_required, superadmin_required,
                   get_user_farms, create_farm, user_can_access_farm,
                   change_password, init_auth)
 from devices import send_command, ping_device, ESP32_FIRMWARE
+
+# ─── MODUŁY ROZSZERZEŃ ───────────────────────────────────────────────────────
+from baza_skladnikow import init_skladniki_tables, seed_skladniki
+from fixes_v5 import register_fixes
+from dashboard_fixes import register_dashboard_fixes
+from routes_v5 import register_v5
+from supla_handler import register_supla_routes
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -41,10 +46,21 @@ BASE = """<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
-nav{background:#fff;border-bottom:1px solid #e0ddd4;padding:0 10px;display:flex;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:100}
-nav .logo{font-weight:600;padding:11px 10px 11px 0;font-size:15px;color:#534AB7}
-nav a{padding:11px 8px;text-decoration:none;color:#5f5e5a;font-size:13px;border-bottom:2px solid transparent;white-space:nowrap}
-nav a:hover,nav a.on{color:#2c2c2a;border-bottom-color:#534AB7}
+nav{background:#fff;border-bottom:1px solid #e0ddd4;padding:0 12px;display:flex;align-items:center;gap:2px;position:sticky;top:0;z-index:200;height:48px}
+nav .logo{font-weight:700;font-size:15px;color:#534AB7;padding-right:12px;white-space:nowrap}
+.nb-item{position:relative}
+.nb-link{display:flex;align-items:center;gap:4px;padding:0 10px;height:48px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+.nb-link:hover,.nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
+.nb-link .arr{font-size:9px;opacity:0.5;transition:transform .15s}
+.nb-item:hover .arr{transform:rotate(180deg)}
+.nb-drop{display:none;position:absolute;top:48px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.08);min-width:180px;padding:4px;z-index:300}
+.nb-item:hover .nb-drop{display:block}
+.nb-drop a{display:block;padding:8px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap}
+.nb-drop a:hover{background:#f5f5f0}
+.nb-drop a.on{color:#534AB7;font-weight:500;background:#EEEDFE}
+.nb-sep{height:1px;background:#e0ddd4;margin:4px 0}
+.nb-right{margin-left:auto;display:flex;align-items:center;gap:4px}
+.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:500;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;margin-left:4px}
 .wrap{max-width:980px;margin:0 auto;padding:14px}
 h1{font-size:19px;font-weight:500;margin-bottom:14px}
@@ -91,32 +107,80 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
 </head>
 <body>
 <nav>
-  <span class="logo">Ferma</span>
+  <span class="logo">&#x1F413; Ferma</span>
   {% if farm_id %}
-  <span class="farm-badge">{{ farm_name }}</span>
-  <a href="/" class="{{ 'on' if p=='dash' }}">Dashboard</a>
-  <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja</a>
-  <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
-  <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zamówienia</a>
-  <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
-  <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
-  <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia</a>
-  <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
-  <a href="/kiosk">Kiosk</a>
-  <a href="/pojenie" class="{{ 'on' if p=='gpio' }}">Pojenie</a>
-  <a href="/wyposazenie" class="{{ 'on' if p=='wyp' }}">Wyposażenie</a>
-  <a href="/dzienne-czynnosci">Czynności</a>
-  <a href="/energia">Energia</a>
-  <a href="/pasza/predykcja">Predykcja</a>
-  <a href="/gpio/pwm">LED</a>
-  <a href="/pasza/analityka">Analityka</a>
-  <a href="/import/xlsx">Import</a>
+  <span class="farm-badge" title="{{ farm_name }}">{{ farm_name }}</span>
+  <a href="/" class="nb-link {{ 'on' if p=='dash' }}">Dashboard</a>
+  <div class="nb-item">
+    <span class="nb-link {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="arr">&#9660;</span></span>
+    <div class="nb-drop">
+      <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
+      <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
+      <div class="nb-sep"></div>
+      <a href="/dzienne-czynnosci">Czynności dzienne</a>
+    </div>
+  </div>
+  <div class="nb-item">
+    <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzedaż <span class="arr">&#9660;</span></span>
+    <div class="nb-drop">
+      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zamówienia</a>
+      <a href="/klienci">Klienci</a>
+      <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
+    </div>
+  </div>
+  <div class="nb-item">
+    <span class="nb-link {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="arr">&#9660;</span></span>
+    <div class="nb-drop">
+      <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
+      <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
+      <a href="/pasza/predykcja">Predykcja paszy</a>
+      <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
+      <a href="/energia">Energia</a>
+      <div class="nb-sep"></div>
+      <a href="/wyposazenie" class="{{ 'on' if p=='wyp' }}">Wyposażenie</a>
+    </div>
+  </div>
+  <div class="nb-item">
+    <span class="nb-link {{ 'on' if p in ['gpio','urz','kal'] }}">Sterowanie <span class="arr">&#9660;</span></span>
+    <div class="nb-drop">
+      <a href="/gpio" class="{{ 'on' if p=='gpio' }}">GPIO / przekaźniki</a>
+      <a href="/gpio/pwm">LED PWM</a>
+      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
+      <div class="nb-sep"></div>
+      <a href="/pojenie">Pojenie</a>
+      <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
+      <div class="nb-sep"></div>
+      <a href="/integracje/esphome">ESPHome</a>
+      <a href="/integracje/supla">Supla</a>
+    </div>
+  </div>
+  <div class="nb-item">
+    <span class="nb-link {{ 'on' if p=='ana' }}">Analityka <span class="arr">&#9660;</span></span>
+    <div class="nb-drop">
+      <a href="/analityka" class="{{ 'on' if p=='ana' }}">Wykresy</a>
+      <a href="/pasza/analityka">Analiza paszy</a>
+      <a href="/pasza/skladniki-baza">Baza składników</a>
+    </div>
+  </div>
   {% endif %}
-  <a href="/wybierz-gospodarstwo" class="{{ 'on' if p=='farms' }}" style="margin-left:auto">Gospodarstwa</a>
-  {% if rola == 'superadmin' %}<a href="/admin" class="{{ 'on' if p=='admin' }}">Admin</a>{% endif %}
-  <a href="/konto">{{ login }}</a>
-  <a href="/admin/farm-assign">Przypisz farmy</a>
-  <a href="/logout">Wyloguj</a>
+  <div class="nb-right">
+    <a href="/wybierz-gospodarstwo" class="nb-link {{ 'on' if p=='farms' }}" title="Zmień gospodarstwo">&#x1F3E1;</a>
+    <div class="nb-item">
+      <span class="nb-link">{{ login }} <span class="arr">&#9660;</span></span>
+      <div class="nb-drop" style="right:0;left:auto">
+        <a href="/konto">Moje konto</a>
+        <a href="/import/xlsx">Import xlsx</a>
+        <a href="/ustawienia">Ustawienia</a>
+        {% if rola == 'superadmin' %}
+        <div class="nb-sep"></div>
+        <a href="/admin" class="{{ 'on' if p=='admin' }}">Panel admina</a>
+        <a href="/admin/farm-assign">Przypisz farmy</a>
+        {% endif %}
+        <div class="nb-sep"></div>
+        <a href="/logout" style="color:#A32D2D">Wyloguj</a>
+      </div>
+    </div>
+  </div>
 </nav>
 <div class="wrap">
 {% with msgs = get_flashed_messages() %}{% if msgs %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}
@@ -824,7 +888,7 @@ def wydatki_dodaj():
         '<div><label>Data</label><input name="data" type="date" value="' + date.today().isoformat() + '"></div>'
         '<div><label>Kategoria</label><select name="kategoria">' + kat_opt + '</select></div>'
         '</div>'
-        '<label>Nazwa</label><input name="nazwa" required placeholder="np. Pszenica, Vitamix">'
+        '<label>Nazwa</label>''<div style="position:relative">''<input name="nazwa" id="wyd-n" required placeholder="np. Pszenica, Vitamix" autocomplete="off" oninput="szukajN(this.value)">''<div id="wyd-sug" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d3d1c7;border-radius:8px;z-index:50;max-height:200px;overflow-y:auto"></div>''</div>''<script>''function szukajN(q){if(q.length<2){document.getElementById("wyd-sug").style.display="none";return;}''fetch("/api/zboze-lista").then(r=>r.json()).then(data=>{''var f=data.filter(d=>d.nazwa.toLowerCase().includes(q.toLowerCase()));''var el=document.getElementById("wyd-sug");''if(!f.length){el.style.display="none";return;}''el.innerHTML=f.slice(0,8).map(d=>"<div style=\"padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0ede4\" onclick=\"wybN(\\\"" +d.nazwa+ "\\\",\\\"" +d.kategoria+ "\\\"," +d.cena+ ")\"><b>"+d.nazwa+"</b> <span style=\"color:#888;font-size:12px\">("+d.kategoria+")</span>"+(d.cena>0?" <span style=\"float:right;color:#534AB7\">" +d.cena+ " zł/kg</span>":"")+"</div>").join("");''el.style.display="block";});} ''function wybN(n,k,c){document.getElementById("wyd-n").value=n;''var sel=document.querySelector("[name=kategoria]");''if(k==="zboze"||k==="bialkowe")sel.value="Zboże/pasza";''else if(k==="premiks"||k==="mineralne"||k==="naturalny_dodatek")sel.value="Witaminy/suplementy";''if(c>0){var ci=document.querySelector("[name=cena_jednostkowa]");if(ci)ci.value=c;}''document.getElementById("wyd-sug").style.display="none";}''document.addEventListener("click",function(e){if(!e.target.closest("#wyd-sug")&&!e.target.closest("#wyd-n"))document.getElementById("wyd-sug").style.display="none";});''</script>'
         '<div class="g3">'
         '<div><label>Ilość</label><input name="ilosc" type="number" step="0.01" id="il" oninput="calc()"></div>'
         '<div><label>Jednostka</label><select name="jednostka">'
@@ -1381,15 +1445,24 @@ def admin_config():
     db.commit(); db.close()
     flash("Konfiguracja zapisana.")
     return redirect("/admin")
-from routes_v5 import register_v5
-register_v5(app)
+
+# ─── REJESTRACJA MODUŁÓW ─────────────────────────────────────────────────────
 register_fixes(app)
+register_dashboard_fixes(app)
+register_v5(app)
+register_supla_routes(app)
+
 # ─── START ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
     init_auth()
+    # Inicjalizacja bazy składników paszowych
+    db = get_db()
+    init_skladniki_tables(db)
+    seed_skladniki(db)
+    db.close()
     print("\n" + "="*54)
-    print("  FERMA JAJ SaaS v4 — multi-tenant")
+    print("  FERMA JAJ SaaS v5 — multi-tenant")
     print("  http://localhost:5000")
     print("  Domyślny admin: admin / ferma2024")
     print("="*54 + "\n")
