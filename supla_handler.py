@@ -113,6 +113,19 @@ def init_supla_tables(db):
         ostatni_stan INTEGER DEFAULT 0,
         ostatni_kontakt DATETIME
     );
+    -- Dodaj kolumny jeśli baza już istnieje (migracja)
+    """)
+    for col in ["powiazane_urzadzenie_id INTEGER REFERENCES urzadzenia(id)",
+                "powiazany_kanal TEXT",
+                "ostatni_stan INTEGER DEFAULT 0",
+                "ostatni_kontakt DATETIME"]:
+        try:
+            col_name = col.split()[0]
+            db.execute(f"ALTER TABLE supla_config ADD COLUMN {col}")
+            db.commit()
+        except Exception:
+            pass
+    db.executescript("""
     CREATE TABLE IF NOT EXISTS supla_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         czas DATETIME NOT NULL,

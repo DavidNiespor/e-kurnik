@@ -29,6 +29,8 @@ from dashboard_fixes import register_dashboard_fixes
 from routes_v5 import register_v5
 from supla_handler import register_supla_routes
 from fixes_v6 import register_v6
+from missing_routes import register_missing
+from sterowanie import register_sterowanie
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -144,6 +146,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <div class="nb-item">
     <span class="nb-link {{ 'on' if p in ['gpio','urz','kal'] }}">Sterowanie <span class="arr">&#9660;</span></span>
     <div class="nb-drop">
+      <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Tryby sterowania</a>
       <a href="/gpio" class="{{ 'on' if p=='gpio' }}">GPIO / przekaźniki</a>
       <a href="/gpio/pwm">LED PWM</a>
       <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
@@ -500,7 +503,7 @@ def dashboard():
         '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
         '</div>'
         + (('<div class="card"><b>Urządzenia</b><div class="g4" style="margin-top:10px">' + urz_html + '</div></div>') if urz_html else "")
-        + _kafelki_czynnosci(g, db_cz)
+        + _kafelki_czynnosci(g)
         + '<div class="card"><b>Szybki wpis — dziś</b>'
         + ('<span style="font-size:12px;color:#3B6D11;margin-left:8px">wpisano: ' + str(dzis["jaja_zebrane"]) + ' jaj</span>' if dzis else "")
         + '<form method="POST" action="/produkcja/dodaj" style="margin-top:10px">'
@@ -1519,6 +1522,8 @@ register_dashboard_fixes(app)
 register_v5(app)
 register_supla_routes(app)
 register_v6(app)
+register_missing(app)
+register_sterowanie(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 def startup():
