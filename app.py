@@ -5,6 +5,7 @@ Uruchomienie: python3 app.py
 """
 from flask import Flask, request, redirect, flash, session, jsonify, send_file
 from markupsafe import Markup
+from routes_v5 import register_v5
 from flask import render_template_string
 from datetime import datetime, date, timedelta
 import os, io, json
@@ -100,6 +101,11 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
   <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia</a>
   <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
+  <a href="/kiosk">Kiosk</a>
+  <a href="/pojenie" class="{{ 'on' if p=='gpio' }}">Pojenie</a>
+  <a href="/gpio/pwm">LED</a>
+  <a href="/pasza/analityka">Analityka</a>
+  <a href="/import/xlsx">Import</a>
   {% endif %}
   <a href="/wybierz-gospodarstwo" class="{{ 'on' if p=='farms' }}" style="margin-left:auto">Gospodarstwa</a>
   {% if rola == 'superadmin' %}<a href="/admin" class="{{ 'on' if p=='admin' }}">Admin</a>{% endif %}
@@ -1369,7 +1375,8 @@ def admin_config():
     db.commit(); db.close()
     flash("Konfiguracja zapisana.")
     return redirect("/admin")
-
+from routes_v5 import register_v5
+register_v5(app)
 # ─── START ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
