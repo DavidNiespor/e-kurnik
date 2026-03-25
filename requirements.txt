@@ -1,2 +1,4 @@
 flask>=3.0.0
 markupsafe>=2.1.0
+pandas
+openpyxl
