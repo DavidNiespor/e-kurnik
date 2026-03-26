@@ -458,6 +458,11 @@ def dashboard():
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    zamow_aktywne = db.execute("""SELECT z.id,z.data_dostawy,z.ilosc,z.cena_za_szt,k.nazwa as kn FROM zamowienia z
+        LEFT JOIN klienci k ON z.klient_id=k.id
+        WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone')
+        ORDER BY z.data_dostawy LIMIT 5""", (g,)).fetchall()
     db.close()
 
     pdz = float(gs("pasza_dzienna_kg","6"))
@@ -506,26 +511,49 @@ def dashboard():
         '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,0)) + ' zł</div><div class="l">Przychód miesiąc</div><div class="s">wydatki: ' + str(round(wyd,0)) + ' zł</div></div>'
         '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
         '</div>'
-        + (('<div class="card"><b>Urządzenia</b><div class="g4" style="margin-top:10px">' + urz_html + '</div></div>') if urz_html else "")
+        + (('<div class="card"><b>Przekaźniki</b><div class="g4" style="margin-top:10px">' + urz_html + '</div>'
+            '<a href="/gpio" style="font-size:12px;color:#534AB7;display:block;margin-top:6px">Pełny panel →</a></div>') if urz_html else '')
         + _kafelki_czynnosci(g)
-        + '<div class="card"><b>Szybki wpis — dziś</b>'
-        + ('<span style="font-size:12px;color:#3B6D11;margin-left:8px">wpisano: ' + str(dzis["jaja_zebrane"]) + ' jaj</span>' if dzis else "")
+        + '<div class="g2">'
+
+        # Formularz 1: Zebrane jaja
+        + '<div class="card"><b>Zebrane jaja — dziś</b>'
+        + ('<span style="font-size:12px;color:#3B6D11;margin-left:8px;font-weight:500">wpisano: ' + str(dzis["jaja_zebrane"]) + '</span>' if dzis else '')
         + '<form method="POST" action="/produkcja/dodaj" style="margin-top:10px">'
-        '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-        '<div class="g3">'
-        '<div><label>Zebrane jaja</label><input name="jaja_zebrane" type="number" min="0" value="' + (str(dzis["jaja_zebrane"]) if dzis else "") + '"></div>'
-        '<div><label>Sprzedane dziś</label><input name="jaja_sprzedane" type="number" value="' + (str(dzis["jaja_sprzedane"]) if dzis else "0") + '"></div>'
-        '<div><label>Pasza wydana (kg)</label><input name="pasza_wydana_kg" type="number" step="0.1" value="' + (str(dzis["pasza_wydana_kg"]) if dzis else str(pdz)) + '"></div>'
-        '</div>'
-        '<br><button class="btn bg" type="submit">Zapisz dziś</button>'
-        '</form></div>'
-        '<script>'
-        'function togDev(uid,ch,state){'
-        'fetch("/sterowanie/cmd",{method:"POST",'
-        'headers:{"Content-Type":"application/json"},'
-        'body:JSON.stringify({urzadzenie_id:uid,kanal:ch,stan:state})})'
-        '.then(r=>r.json()).then(()=>location.reload());}'
-        '</script>'
+        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
+        + '<label>Zebrane jaja (szt)</label>'
+        + '<input name="jaja_zebrane" type="number" min="0" value="' + (str(dzis["jaja_zebrane"]) if dzis else "") + '" style="font-size:18px;text-align:center">'
+        + '<label style="margin-top:8px">Pasza wydana (kg)</label>'
+        + '<input name="pasza_wydana_kg" type="number" step="0.1" value="' + (str(dzis["pasza_wydana_kg"]) if dzis else str(pdz)) + '">'
+        + '<br><button class="btn bg" style="width:100%;margin-top:10px;padding:12px">Zapisz jaja</button>'
+        + '</form></div>'
+
+        # Formularz 2: Sprzedaż z klientem
+        + '<div class="card"><b>Sprzedaż — dziś</b>'
+        + '<form method="POST" action="/produkcja/dodaj-pelny" style="margin-top:10px">'
+        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
+        + ('<input type="hidden" name="jaja_zebrane" value="' + str(dzis["jaja_zebrane"]) + '">' if dzis else '')
+        + '<label>Sprzedane (szt)</label>'
+        + '<input name="jaja_sprzedane" type="number" min="0" value="' + (str(dzis["jaja_sprzedane"]) if dzis else "0") + '" id="sp_d" oninput="cWd()">'
+        + '<label>Cena/szt (zł)</label>'
+        + '<input name="cena_sprzedazy" type="number" step="0.01" value="' + (str(dzis["cena_sprzedazy"]) if dzis else gs("cena_jajka","1.20")) + '" id="cn_d" oninput="cWd()">'
+        + '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
+        + '<label>Klient</label>'
+        + '<select name="klient_id"><option value="">— anonimowa —</option>'
+        + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
+        + '</select>'
+        + '<label>Typ płatności</label>'
+        + '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="z_salda">Z salda</option><option value="nastepnym_razem">Następnym razem</option></select>'
+        + ('<label>Zamówienie</label><select name="zamowienie_id"><option value="">— brak —</option>'
+           + "".join('<option value="' + str(z["id"]) + '">' + (z["kn"] or "?") + ' ' + z["data_dostawy"] + ' (' + str(z["ilosc"]) + ' szt.)</option>' for z in zamow_aktywne)
+           + '</select>' if zamow_aktywne else '')
+        + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:12px">Zapisz sprzedaż</button>'
+        + '<a href="/produkcja/dodaj-pelny" style="display:block;text-align:center;font-size:12px;color:#534AB7;margin-top:8px">Pełny formularz →</a>'
+        + '</form>'
+        + '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
+        + '</div>'
+
+        + '</div>'  # end g2
     )
     return R(html, "dash")
 
@@ -934,6 +962,9 @@ def wydatki():
 @farm_required
 def wydatki_dodaj():
     g = gid()
+    prefill_nazwa = request.args.get("nazwa","")
+    prefill_kat   = request.args.get("kategoria","Zboże/pasza")
+
     if request.method == "POST":
         kat  = request.form.get("kategoria","Inne")
         naz  = request.form.get("nazwa","")
@@ -954,33 +985,101 @@ def wydatki_dodaj():
                            (g,kat,naz,jedn,il,cj))
         db.commit(); db.close()
         flash("Wydatek zapisany.")
-        return redirect("/wydatki")
-    kat_opt = "".join('<option value="' + k + '">' + k + '</option>' for k in KATEGORIE)
+        return redirect(request.form.get("next","/wydatki"))
+
+    kat_opt = "".join(
+        '<option value="' + k + '" ' + ('selected' if k==prefill_kat else '') + '>' + k + '</option>'
+        for k in KATEGORIE)
+
+    js = """
+<script>
+function calc(){
+  var il=parseFloat(document.getElementById('il').value)||0,
+      cj=parseFloat(document.getElementById('cj').value)||0;
+  document.getElementById('tot').textContent=(il*cj).toFixed(2)+' zł';
+}
+var _sc=null;
+function szukajN(q){
+  if(q.length<2){document.getElementById('wyd-sug').style.display='none';return;}
+  if(!_sc){fetch('/api/wszystkie-skladniki').then(r=>r.json()).then(d=>{_sc=d;_show(q,d);});return;}
+  _show(q,_sc);
+}
+function _show(q,data){
+  var f=data.filter(d=>d.nazwa.toLowerCase().includes(q.toLowerCase())).slice(0,8);
+  var el=document.getElementById('wyd-sug');
+  if(!f.length){el.style.display='none';return;}
+  el.innerHTML=f.map(function(d){
+    return '<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0ede4" onclick="wybN(this)" '
+      +'data-nazwa="'+d.nazwa+'" data-kat="'+d.kategoria+'" data-cena="'+d.cena+'">'
+      +'<b>'+d.nazwa+'</b>'
+      +'<span style="color:#888;font-size:12px;margin-left:6px">('+d.kategoria+')</span>'
+      +(d.cena>0?'<span style="float:right;color:#534AB7">'+d.cena+' zł/kg</span>':'')
+      +'</div>';
+  }).join('');
+  el.style.display='block';
+}
+function wybN(el){
+  var nazwa=el.dataset.nazwa, kat=el.dataset.kat, cena=parseFloat(el.dataset.cena)||0;
+  document.getElementById('wyd-n').value=nazwa;
+  document.getElementById('wyd-sug').style.display='none';
+  var sel=document.getElementById('kat-sel');
+  if(kat==='zboze'||kat==='bialkowe') sel.value='Zboże/pasza';
+  else if(['premiks','mineralne','naturalny_dodatek'].includes(kat)) sel.value='Witaminy/suplementy';
+  if(cena>0){document.getElementById('cj').value=cena;calc();}
+  fetch('/api/skladnik-info?nazwa='+encodeURIComponent(nazwa))
+    .then(r=>r.json()).then(function(info){
+      var ib=document.getElementById('info-box');
+      if(info.info){ib.textContent=info.info;ib.style.display='block';}
+      else{ib.style.display='none';}
+    });
+}
+document.addEventListener('click',function(e){
+  if(!e.target.closest('#wyd-sug')&&!e.target.closest('#wyd-n'))
+    document.getElementById('wyd-sug').style.display='none';
+});
+</script>"""
+
     html = (
-        '<h1>Dodaj wydatek</h1><div class="card"><form method="POST">'
+        '<h1>Dodaj wydatek</h1>'
+        '<div class="card"><form method="POST">'
+        '<input type="hidden" name="next" value="' + request.args.get("next","/wydatki") + '">'
         '<div class="g2">'
         '<div><label>Data</label><input name="data" type="date" value="' + date.today().isoformat() + '"></div>'
-        '<div><label>Kategoria</label><select name="kategoria">' + kat_opt + '</select></div>'
+        '<div><label>Kategoria</label><select name="kategoria" id="kat-sel">' + kat_opt + '</select></div>'
         '</div>'
-        '<label>Nazwa</label>''<div style="position:relative">''<input name="nazwa" id="wyd-n" required placeholder="np. Pszenica, Vitamix" autocomplete="off" oninput="szukajN(this.value)">''<div id="wyd-sug" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d3d1c7;border-radius:8px;z-index:50;max-height:200px;overflow-y:auto"></div>''</div>''<div id="info-skladnik" style="display:none;background:#EEEDFE;border-radius:6px;padding:6px 10px;font-size:12px;color:#3C3489;margin-top:4px"></div>''<script>''function szukajN(q){if(q.length<2){document.getElementById("wyd-sug").style.display="none";return;}''fetch("/api/wszystkie-skladniki").then(r=>r.json()).then(data=>{''var f=data.filter(d=>d.nazwa.toLowerCase().includes(q.toLowerCase()));''var el=document.getElementById("wyd-sug");''if(!f.length){el.style.display="none";return;}''el.innerHTML=f.slice(0,8).map(d=>"<div style=\"padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0ede4\" onclick=\"wybN(\\\"" +d.nazwa+ "\\\",\\\"" +d.kategoria+ "\\\"," +d.cena+ ")\"><b>"+d.nazwa+"</b> <span style=\"color:#888;font-size:12px\">("+d.kategoria+")</span>"+(d.cena>0?" <span style=\"float:right;color:#534AB7\">" +d.cena+ " zł/kg</span>":"")+"</div>").join("");''el.style.display="block";});} ''function wybN(n,k,c){document.getElementById("wyd-n").value=n;''var sel=document.querySelector("[name=kategoria]");''if(k==="zboze"||k==="bialkowe")sel.value="Zboże/pasza";''else if(k==="premiks"||k==="mineralne"||k==="naturalny_dodatek")sel.value="Witaminy/suplementy";''if(c>0){var ci=document.querySelector("[name=cena_jednostkowa]");if(ci)ci.value=c;}''document.getElementById("wyd-sug").style.display="none";''fetch("/api/skladnik-info?nazwa="+encodeURIComponent(n)).then(r=>r.json()).then(d=>{var ib=document.getElementById("info-skladnik");if(d.info){ib.textContent=d.info;ib.style.display="block";}else{ib.style.display="none";}});}''document.addEventListener("click",function(e){if(!e.target.closest("#wyd-sug")&&!e.target.closest("#wyd-n"))document.getElementById("wyd-sug").style.display="none";});''</script>'
-        '<div class="g3">'
+        '<label>Nazwa składnika / produktu</label>'
+        '<div style="position:relative">'
+        '<input name="nazwa" id="wyd-n" required autocomplete="off"'
+        ' value="' + prefill_nazwa + '"'
+        ' placeholder="Zacznij pisać: Pszenica, Kukurydza, Dolmix..."'
+        ' oninput="szukajN(this.value)">'
+        '<div id="wyd-sug" style="display:none;position:absolute;top:100%;left:0;right:0;'
+        'background:#fff;border:1px solid #d3d1c7;border-radius:0 0 8px 8px;'
+        'z-index:100;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">'
+        '</div></div>'
+        '<div id="info-box" style="display:none;background:#EEEDFE;border-radius:6px;'
+        'padding:6px 12px;font-size:12px;color:#3C3489;margin-top:4px"></div>'
+        '<div class="g3" style="margin-top:8px">'
         '<div><label>Ilość</label><input name="ilosc" type="number" step="0.01" id="il" oninput="calc()"></div>'
         '<div><label>Jednostka</label><select name="jednostka">'
-        '<option value="kg">kg</option><option value="szt">szt</option><option value="l">l</option><option value="op">opak.</option>'
+        '<option value="kg">kg</option><option value="szt">szt</option>'
+        '<option value="l">l</option><option value="op">opak.</option>'
         '</select></div>'
         '<div><label>Cena/jedn. (zł)</label><input name="cena_jednostkowa" type="number" step="0.01" id="cj" oninput="calc()"></div>'
         '</div>'
-        '<div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-top:8px;font-size:14px">Łącznie: <b id="tot">0.00 zł</b></div>'
+        '<div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-top:8px;font-size:14px">'
+        'Łącznie: <b id="tot">0.00 zł</b></div>'
         '<div class="g2">'
         '<div><label>Dostawca</label><input name="dostawca"></div>'
         '<div><label>Uwagi</label><input name="uwagi"></div>'
         '</div>'
-        '<br><button class="btn bp">Zapisz</button>'
+        '<br><button class="btn bp">Zapisz wydatek</button>'
         '<a href="/wydatki" class="btn bo" style="margin-left:8px">Anuluj</a>'
         '</form></div>'
-        '<script>function calc(){var il=parseFloat(document.getElementById("il").value)||0;var cj=parseFloat(document.getElementById("cj").value)||0;document.getElementById("tot").textContent=(il*cj).toFixed(2)+" zł";}</script>'
+        + js
     )
     return R(html, "wyd")
+
 
 @app.route("/wydatki/<int:wid>/usun")
 @farm_required
@@ -1007,7 +1106,7 @@ def pasza():
         '<tr><td>' + s["nazwa"] + '</td>'
         '<td style="font-weight:500;color:' + ('#A32D2D' if s["stan"]<s["min_zapas"] and s["min_zapas"]>0 else '#2c2c2a') + '">' + str(round(s["stan"],1)) + ' ' + s["jednostka"] + '</td>'
         '<td>' + str(round(s["cena_aktualna"],2)) + ' zł</td>'
-        '<td><a href="/wydatki/dodaj" class="btn bo bsm">+ Zakup</a></td></tr>'
+        '<td><a href="/wydatki/dodaj?nazwa=' + s["nazwa"] + '&kategoria=' + s["kategoria"] + '&next=/pasza" class="btn bp bsm">+ Zakup</a></td></tr>'
         for s in skladniki
     )
     w_mies = "".join(
