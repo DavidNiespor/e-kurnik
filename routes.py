@@ -945,7 +945,7 @@ def register_routes(app):
         else: stan=None
         if channel_id is None: return jsonify({"ok":False,"msg":"no channel_id"}),400
         db=get_db()
-        tok=db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_webhook_token' AND gospodarstwo_id IS NOT NULL").fetchone()
+        tok=db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_webhook_token' ORDER BY gospodarstwo_id DESC LIMIT 1").fetchone()
         if tok and tok["wartosc"] and request.headers.get("X-Supla-Token","")!=tok["wartosc"]:
             db.close(); return jsonify({"ok":False,"msg":"invalid token"}),403
         cfg=db.execute("SELECT * FROM supla_config WHERE channel_id=? AND aktywny=1",(channel_id,)).fetchone()
@@ -1284,11 +1284,15 @@ def register_routes(app):
                 df=xl["JAJKA"].dropna(subset=["Data"])
                 for _,row in df.iterrows():
                     try:
+                        if pd.isna(row.get("Data")): continue
                         d=pd.to_datetime(row["Data"]).strftime("%Y-%m-%d")
-                        jaja=int(float(row.get("Ilość Jajek") or 0))
-                        s12=float(row.get("Sprzedane Jajka po 1,2") or 0)
-                        s10=float(row.get("Sprzedane Jajka po 1,0") or 0)
-                        sprzed=int(s12+s10); zarobek=float(row.get("Zarobek") or 0)
+                        jaja_raw=row.get("Ilość Jajek")
+                        jaja=int(float(jaja_raw)) if jaja_raw is not None and not pd.isna(jaja_raw) else 0
+                        s12_raw=row.get("Sprzedane Jajka po 1,2"); s10_raw=row.get("Sprzedane Jajka po 1,0")
+                        s12=float(s12_raw) if s12_raw is not None and not pd.isna(s12_raw) else 0.0
+                        s10=float(s10_raw) if s10_raw is not None and not pd.isna(s10_raw) else 0.0
+                        sprzed=int(s12+s10)
+                        zarobek_raw=row.get("Zarobek"); zarobek=float(zarobek_raw) if zarobek_raw is not None and not pd.isna(zarobek_raw) else 0.0
                         cena=round(zarobek/sprzed,2) if sprzed>0 else 0
                         ex=db.execute("SELECT id,jaja_sprzedane FROM produkcja WHERE gospodarstwo_id=? AND data=?",(g,d)).fetchone()
                         if not ex:

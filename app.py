@@ -1455,8 +1455,14 @@ def admin():
         '<tr><td style="font-weight:500">' + f["nazwa"] + '</td>'
         '<td>' + str(f["n_user"]) + '</td>'
         '<td>' + (f["data_utworzenia"][:10] if f["data_utworzenia"] else "—") + '</td>'
-        '<td><span class="badge ' + ('b-green' if f["aktywne"] else 'b-gray') + '">' + ('aktywne' if f["aktywne"] else 'nieaktywne') + '</span></td>'
-        '</tr>'
+        '<td><span class="badge ' + ('b-green' if f["aktywne"] else 'b-gray') + '">' + ('aktywna' if f["aktywne"] else 'nieaktywna') + '</span></td>'
+        '<td class="nowrap">'
+        '<form method="POST" action="/admin/farm/' + str(f["id"]) + '/toggle" style="display:inline">'
+        '<button class="btn bo bsm">' + ('Wyłącz' if f["aktywne"] else 'Włącz') + '</button></form> '
+        '<form method="POST" action="/admin/farm/' + str(f["id"]) + '/usun" style="display:inline" '
+        'onsubmit="return confirm(' + "'" + 'Dezaktywować farmę?' + "'" + ')">' 
+        '<button class="btn br bsm">Usuń</button></form>'
+        '</td></tr>'
         for f in farms
     )
     cfg_html = "".join(
@@ -1513,6 +1519,29 @@ def admin_config():
 register_routes(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
+@app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
+@login_required
+@superadmin_required
+def admin_farm_usun(fid):
+    db = get_db()
+    # Nie pozwól usunąć farmy do której ktoś jest zalogowany
+    db.execute("DELETE FROM uzytkownicy_gospodarstwa WHERE gospodarstwo_id=?", (fid,))
+    db.execute("UPDATE gospodarstwa SET aktywne=0 WHERE id=?", (fid,))
+    db.commit(); db.close()
+    flash("Farma usunięta (dezaktywowana).")
+    return redirect("/admin")
+
+@app.route("/admin/farm/<int:fid>/toggle", methods=["POST"])
+@login_required
+@superadmin_required
+def admin_farm_toggle(fid):
+    db = get_db()
+    db.execute("UPDATE gospodarstwa SET aktywne=1-aktywne WHERE id=?", (fid,))
+    db.commit(); db.close()
+    flash("Status farmy zmieniony.")
+    return redirect("/admin")
+
+
 def startup():
     init_db()
     init_auth()
