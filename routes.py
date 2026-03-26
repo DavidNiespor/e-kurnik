@@ -1191,67 +1191,337 @@ def register_routes(app):
     @app.route("/pasza/analityka")
     @farm_required
     def pasza_analityka_page():
-        g=gid(); db=get_db()
-        rec=db.execute("SELECT * FROM receptura WHERE gospodarstwo_id=? AND aktywna=1 LIMIT 1",(g,)).fetchone()
-        if not rec:
+        g = gid(); db = get_db()
+
+        # Wszystkie aktywne receptury
+        receptury = db.execute(
+            "SELECT * FROM receptura WHERE gospodarstwo_id=? ORDER BY aktywna DESC, nazwa", (g,)).fetchall()
+
+        if not receptury:
             db.close()
-            return R('<h1>Analityka paszy</h1><div class="card"><p style="color:#888">Brak aktywnej receptury. <a href="/pasza/receptury" style="color:#534AB7">Dodaj i aktywuj recepturę</a>.</p></div>',"ana")
-        sklady=db.execute("""SELECT rs.procent,sm.nazwa,
-            COALESCE(sb.bialko_pct,0) as bialko,COALESCE(sb.energia_me,0) as energia,
-            COALESCE(sb.wapn_g_kg,0) as wapn,COALESCE(sb.fosfor_g_kg,0) as fosfor,
-            COALESCE(sb.lizyna_g_kg,0) as lizyna,COALESCE(sb.metionina_g_kg,0) as met,
-            COALESCE(sb.cena_pln_t,0) as cena_t
-            FROM receptura_skladnik rs JOIN stan_magazynu sm ON rs.magazyn_id=sm.id
-            LEFT JOIN skladniki_baza sb ON LOWER(TRIM(sb.nazwa))=LOWER(TRIM(sm.nazwa))
-            WHERE rs.receptura_id=?""",(rec["id"],)).fetchall()
+            return R(
+                '<h1>Analityka paszy</h1>'
+                '<div class="card"><p style="color:#888">Brak receptur. '
+                '<a href="/pasza/receptury" style="color:#534AB7">Dodaj recepturę</a>.</p></div>', "ana")
+
+        # Wybrana receptura (aktywna domyślnie)
+        rid_sel = int(request.args.get("rid", 0) or 0)
+        if not rid_sel:
+            aktywna = next((r for r in receptury if r["aktywna"]), receptury[0])
+            rid_sel = aktywna["id"]
+
+        rec = next((r for r in receptury if r["id"] == rid_sel), receptury[0])
+
+        # Składniki receptury z wartościami odżywczymi
+        sklady = db.execute("""
+            SELECT rs.procent, sm.nazwa, sm.stan, sm.jednostka, sm.cena_aktualna,
+                   COALESCE(sb.bialko_pct,    0) as bialko,
+                   COALESCE(sb.energia_me,    0) as energia,
+                   COALESCE(sb.tluszcz_pct,   0) as tluszcz,
+                   COALESCE(sb.wlokno_pct,    0) as wlokno,
+                   COALESCE(sb.wapn_g_kg,     0) as wapn,
+                   COALESCE(sb.fosfor_g_kg,   0) as fosfor,
+                   COALESCE(sb.lizyna_g_kg,   0) as lizyna,
+                   COALESCE(sb.metionina_g_kg,0) as met,
+                   COALESCE(sb.cena_pln_t,    0) as cena_t,
+                   sb.uwagi as skladnik_opis
+            FROM receptura_skladnik rs
+            JOIN stan_magazynu sm ON rs.magazyn_id = sm.id
+            LEFT JOIN skladniki_baza sb ON LOWER(TRIM(sb.nazwa)) = LOWER(TRIM(sm.nazwa))
+            WHERE rs.receptura_id = ?
+            ORDER BY rs.procent DESC""", (rid_sel,)).fetchall()
         db.close()
-        wyniki={"bialko":0,"energia":0,"wapn":0,"fosfor":0,"lizyna":0,"met":0,"koszt":0}
+
+        # ── Oblicz wartości wypadkowe ─────────────────────────────────────────
+        W = {"bialko":0,"energia":0,"tluszcz":0,"wlokno":0,
+             "wapn":0,"fosfor":0,"lizyna":0,"met":0,"koszt":0,"suma_pct":0}
         for s in sklady:
-            p=float(s["procent"] or 0)
-            wyniki["bialko"]  +=s["bialko"]*p
-            wyniki["energia"] +=s["energia"]*p
-            wyniki["wapn"]    +=s["wapn"]*p*10
-            wyniki["fosfor"]  +=s["fosfor"]*p*10
-            wyniki["lizyna"]  +=s["lizyna"]*p*10
-            wyniki["met"]     +=s["met"]*p*10
-            wyniki["koszt"]   +=s["cena_t"]*p
-        N=_NORMY
-        def _bar(val,mn,mx=None,unit=""):
-            if not val: return f'<span style="color:#888;font-size:12px">Brak danych</span>'
-            mx2=mx or mn*1.5
-            pct=min(100,max(0,(val-mn*0.7)/(mx2*1.3-mn*0.7)*100))
-            kol="#3B6D11" if mn<=val<=(mx or val*1.5) else "#A32D2D"
-            return (f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0">'
-                    f'<div style="width:100px;background:#e0ddd4;border-radius:4px;height:8px">'
-                    f'<div style="width:{pct:.0f}%;background:{kol};height:100%;border-radius:4px"></div></div>'
-                    f'<span style="font-size:13px;color:{kol};font-weight:500">{val:.1f}{unit}</span>'
-                    f'<span style="font-size:11px;color:#888">({mn:.0f}–{mx or "?"})</span></div>')
-        reks=[]
-        if wyniki["bialko"]<N["b_min"]: reks.append(("🔴","Białko za niskie","Zwiększ groch lub łubin (+2%)"))
-        elif wyniki["bialko"]>N["b_max"]: reks.append(("🟡","Białko za wysokie","Zmniejsz białkowe na rzecz kukurydzy"))
-        if wyniki["wapn"]<N["ca_min"]: reks.append(("🔴","Wapń za niski — miękkie skorupki!","Zwiększ kredę pastewną"))
-        if wyniki["energia"]<N["e_min"]: reks.append(("🟡","Energia za niska","Zwiększ kukurydzę lub dodaj tłuszcz"))
-        if wyniki["lizyna"]<N["liz_min"]: reks.append(("🟡","Lizyna za mała","Dodaj drożdże browarniane (+0.2%)"))
-        if not reks: reks.append(("✅","Receptura w normach","Składniki w prawidłowych proporcjach"))
-        r_html="".join(
-            f'<div style="border-left:3px solid {"#A32D2D" if ico=="🔴" else "#BA7517" if ico=="🟡" else "#3B6D11"};'
-            f'padding:8px 12px;border-radius:0 8px 8px 0;margin-bottom:8px;background:#fafaf8">'
-            f'<div style="font-weight:500;font-size:13px">{ico} {problem}</div>'
-            f'<div style="font-size:13px;color:#5f5e5a;margin-top:3px">{rozw}</div></div>'
-            for ico,problem,rozw in reks)
-        html=(f'<h1>Analityka paszy — {rec["nazwa"]}</h1><div class="g2">'
-            '<div class="card"><b>Wartości odżywcze</b><div style="margin-top:10px">'
-            f'<p style="font-size:12px;color:#5f5e5a">Białko surowe (%)</p>'+_bar(wyniki["bialko"],N["b_min"],N["b_max"],"%")
-            +f'<p style="font-size:12px;color:#5f5e5a;margin-top:6px">Energia ME (kcal/kg)</p>'+_bar(wyniki["energia"],N["e_min"],N["e_max"])
-            +f'<p style="font-size:12px;color:#5f5e5a;margin-top:6px">Wapń (g/kg)</p>'+_bar(wyniki["wapn"],N["ca_min"],N["ca_max"]," g/kg")
-            +f'<p style="font-size:12px;color:#5f5e5a;margin-top:6px">Fosfor (g/kg)</p>'+_bar(wyniki["fosfor"],N["p_min"],N["p_min"]*1.5," g/kg")
-            +f'<p style="font-size:12px;color:#5f5e5a;margin-top:6px">Lizyna (g/kg)</p>'+_bar(wyniki["lizyna"],N["liz_min"],N["liz_min"]*1.5," g/kg")
-            +f'<div style="margin-top:12px;font-size:13px;color:#5f5e5a">Koszt: <b>{round(wyniki["koszt"],0)} PLN/T</b></div></div></div>'
-            f'<div class="card"><b>Rekomendacje</b><div style="margin-top:10px">{r_html}</div></div></div>'
-            '<div style="display:flex;gap:8px;margin-top:8px">'
-            '<a href="/pasza/skladniki-baza" class="btn bo bsm">Baza składników</a>'
-            '<a href="/pasza/receptury" class="btn bo bsm">← Receptury</a></div>')
-        return R(html,"ana")
+            p = float(s["procent"] or 0)
+            W["suma_pct"] += p
+            W["bialko"]   += s["bialko"]  * p
+            W["energia"]  += s["energia"] * p
+            W["tluszcz"]  += s["tluszcz"] * p
+            W["wlokno"]   += s["wlokno"]  * p
+            W["wapn"]     += s["wapn"]    * p * 10   # g/kg → g/kg paszy
+            W["fosfor"]   += s["fosfor"]  * p * 10
+            W["lizyna"]   += s["lizyna"]  * p * 10
+            W["met"]      += s["met"]     * p * 10
+            W["koszt"]    += s["cena_t"]  * p         # PLN/T * proporcja
+
+        N = _NORMY  # normy z góry pliku
+
+        # ── Funkcja paska postępu ─────────────────────────────────────────────
+        def _bar(label, val, mn, mx, unit="", uwaga=""):
+            if val == 0 and mn > 0:
+                bar_html = '<span style="color:#aaa;font-size:12px">brak danych</span>'
+                status = "brak"
+            elif val < mn:
+                pct = min(95, val/mn*100) if mn else 0
+                kol = "#A32D2D"; status = "niski"
+                bar_html = (
+                    f'<div style="width:200px;background:#e0ddd4;border-radius:4px;height:10px;position:relative">'
+                    f'<div style="width:{pct:.0f}%;background:{kol};height:100%;border-radius:4px"></div>'
+                    f'<div style="position:absolute;left:{min(pct,90):.0f}%;top:-1px;font-size:8px;color:{kol}">▼</div>'
+                    f'</div>'
+                )
+            elif mx and val > mx:
+                kol = "#BA7517"; status = "wysoki"
+                bar_html = (
+                    f'<div style="width:200px;background:#e0ddd4;border-radius:4px;height:10px">'
+                    f'<div style="width:100%;background:{kol};height:100%;border-radius:4px"></div>'
+                    f'</div>'
+                )
+            else:
+                pct = min(100, (val-mn)/(mx-mn)*100) if mx and mx>mn else 60
+                kol = "#3B6D11"; status = "ok"
+                bar_html = (
+                    f'<div style="width:200px;background:#e0ddd4;border-radius:4px;height:10px">'
+                    f'<div style="width:{pct:.0f}%;background:{kol};height:100%;border-radius:4px"></div>'
+                    f'</div>'
+                )
+
+            status_ico = {"ok":"✓","niski":"↓","wysoki":"↑","brak":"?"}[status]
+            status_kol = {"ok":"#3B6D11","niski":"#A32D2D","wysoki":"#BA7517","brak":"#aaa"}[status]
+            norma_str = f"{mn:.1f}–{mx:.1f}" if mx else f"≥{mn:.1f}"
+
+            return (
+                f'<tr>'
+                f'<td style="font-size:13px;color:#5f5e5a;padding:7px 8px;min-width:140px">{label}</td>'
+                f'<td style="padding:7px 8px">{bar_html}</td>'
+                f'<td style="font-weight:600;color:{status_kol};padding:7px 8px;font-size:14px">'
+                f'{val:.2f}{unit}</td>'
+                f'<td style="font-size:11px;color:#888;padding:7px 8px">{norma_str}{unit}</td>'
+                f'<td style="font-size:16px;padding:7px 8px" title="{status}">'
+                f'<span style="color:{status_kol}">{status_ico}</span></td>'
+                + (f'<td style="font-size:11px;color:#888;padding:7px 8px">{uwaga}</td>' if uwaga else '<td></td>')
+                + f'</tr>'
+            ), status
+
+        # ── Oblicz wszystkie wskaźniki ────────────────────────────────────────
+        wskazniki = []
+        def _add(label, key, mn, mx, unit, uwaga=""):
+            row, st = _bar(label, W[key], mn, mx, unit, uwaga)
+            wskazniki.append((label, W[key], mn, mx, unit, st, row))
+
+        _add("Białko surowe",  "bialko",  N["b_min"],   N["b_max"],  "%",
+             "Norma nioski 15.5–18%")
+        _add("Energia ME",     "energia", N["e_min"],   N["e_max"],  " kcal/kg",
+             "Min 2700 dla dobrej produkcji")
+        _add("Tłuszcz surowy", "tluszcz", 3.0,          6.0,         "%",
+             "Zbyt dużo może powodować biegunkę")
+        _add("Włókno surowe",  "wlokno",  2.5,          6.0,         "%",
+             "Wspomaga trawienie")
+        _add("Wapń Ca",        "wapn",    N["ca_min"],  N["ca_max"],  " g/kg",
+             "Kluczowy dla skorupek! Niedobór = miękkie jaja")
+        _add("Fosfor P",       "fosfor",  N["p_min"],   N["p_min"]*1.5, " g/kg",
+             "Stosunek Ca:P powinien być 4:1")
+        _add("Lizyna",         "lizyna",  N["liz_min"], N["liz_min"]*1.5, " g/kg",
+             "Aminokwas limitujący nieśność")
+        _add("Metionina",      "met",     N["met_min"], N["met_min"]*1.5, " g/kg",
+             "Synteza białka jaja, pióra")
+
+        # Stosunek Ca:P
+        ca_p = round(W["wapn"]/W["fosfor"],1) if W["fosfor"] > 0 else 0
+
+        # ── Rekomendacje ─────────────────────────────────────────────────────
+        reks = []
+        zlych = sum(1 for _,_,_,_,_,st,_ in wskazniki if st in ("niski","wysoki"))
+
+        for label, val, mn, mx, unit, st, _ in wskazniki:
+            if st == "niski":
+                if "Białko" in label:
+                    reks.append(("🔴","MAKRO: Białko za niskie",
+                                  f"Wartość: {val:.1f}% (norma ≥{mn:.1f}%). "
+                                  "Dodaj groch (+2–3%), łubin słodki (+2%) lub śrutę sojową (+1%). "
+                                  "Każde +1% grochu = ok +0.22% białka."))
+                elif "Energia" in label:
+                    reks.append(("🟡","MAKRO: Energia za niska",
+                                  f"Wartość: {val:.0f} kcal/kg (norma ≥{mn:.0f}). "
+                                  "Zwiększ kukurydzę kosztem pszenicy lub owsa. "
+                                  "Kukurydza ma 3370 kcal/kg vs pszenica 3090."))
+                elif "Wapń" in label:
+                    reks.append(("🔴","MAKRO: Wapń krytycznie niski — MIĘKKIE SKORUPKI",
+                                  f"Wartość: {val:.1f} g/kg (norma {mn:.0f}–{mx:.0f} g/kg). "
+                                  "Natychmiast zwiększ kredę pastewną! "
+                                  "Norma: kreda stanowi 8–10% mieszanki. "
+                                  "Jeśli używasz Dolmix DN RE sprawdź czy dawka jest prawidłowa."))
+                elif "Fosfor" in label:
+                    reks.append(("🟡","MAKRO: Fosfor za niski",
+                                  f"Wartość: {val:.1f} g/kg (norma ≥{mn:.1f}). "
+                                  "Dodaj więcej pszenicy lub owsa. "
+                                  "Sprawdź czy Dolmix zawiera fosfor."))
+                elif "Lizyna" in label:
+                    reks.append(("🟡","MIKRO: Lizyna za niska",
+                                  f"Wartość: {val:.2f} g/kg (norma ≥{mn:.1f}). "
+                                  "Dodaj drożdże browarniane (+0.3%) lub śrutę sojową. "
+                                  "Lizyna warunkuje nieśność i masę jaja."))
+                elif "Metionina" in label:
+                    reks.append(("🟡","MIKRO: Metionina za niska",
+                                  f"Wartość: {val:.2f} g/kg (norma ≥{mn:.1f}). "
+                                  "Dodaj śrutę słonecznikową (+1–2%) lub siemię lniane. "
+                                  "Metionina odpowiada za jakość piór i białko jaja."))
+                elif "Tłuszcz" in label:
+                    reks.append(("🟡","MAKRO: Tłuszcz za niski",
+                                  f"Wartość: {val:.1f}% (norma {mn:.1f}–{mx:.1f}%). "
+                                  "Dodaj siemię lniane (+0.5%) — przy okazji da omega-3."))
+                elif "Włókno" in label:
+                    reks.append(("🟡","MAKRO: Włókno za niskie",
+                                  f"Wartość: {val:.1f}% (norma {mn:.1f}–{mx:.1f}%). "
+                                  "Dodaj owies (+2%), lucernę (+1%) lub siemię lniane."))
+            elif st == "wysoki":
+                if "Białko" in label:
+                    reks.append(("🟡","MAKRO: Białko za wysokie — zbędny koszt",
+                                  f"Wartość: {val:.1f}% (norma ≤{mx:.1f}%). "
+                                  "Nadmiar białka to dodatkowy koszt i obciążenie nerek. "
+                                  "Zmniejsz groch/łubin o 3–5% zastępując kukurydzą."))
+                elif "Włókno" in label:
+                    reks.append(("🟡","MAKRO: Włókno za wysokie",
+                                  f"Wartość: {val:.1f}% (norma ≤{mx:.1f}%). "
+                                  "Za dużo włókna obniża strawność. Zmniejsz owies lub lucernę."))
+
+        # Stosunek Ca:P
+        if W["fosfor"] > 0:
+            if ca_p < 3.5:
+                reks.append(("🟡","MINERAŁY: Stosunek Ca:P zbyt niski",
+                              f"Ca:P = {ca_p:.1f} (norma 3.5–5.0). "
+                              "Zwiększ kredę pastewną lub zmniejsz udział zbóż."))
+            elif ca_p > 6.0:
+                reks.append(("🟡","MINERAŁY: Stosunek Ca:P zbyt wysoki",
+                              f"Ca:P = {ca_p:.1f} (norma 3.5–5.0). "
+                              "Zmniejsz kredę lub zwiększ fosfor przez pszenicę."))
+
+        if not reks:
+            reks.append(("✅","Receptura w normach!",
+                          "Wszystkie makro i mikroskładniki mieszczą się w normach dla niosek. "
+                          "Koszt: " + str(round(W["koszt"],0)) + " PLN/T"))
+
+        # ── HTML ──────────────────────────────────────────────────────────────
+        # Selector receptury
+        rec_tabs = "".join(
+            f'<a href="/pasza/analityka?rid={r["id"]}" '
+            f'class="btn {"bg" if r["id"]==rid_sel else "bo"} bsm">'
+            f'{"✓ " if r["aktywna"] else ""}{r["nazwa"]}</a>'
+            for r in receptury)
+
+        # Tabela składników z wkładem
+        skl_rows = ""
+        for s in sklady:
+            p = float(s["procent"] or 0)
+            has_data = s["bialko"] > 0 or s["energia"] > 0
+            brak_info = "" if has_data else '<span style="color:#e0ddd4;font-size:10px" title="Brak w bazie składników">?</span>'
+            skl_rows += (
+                f'<tr style="{"background:#f9f9f6" if not has_data else ""}">'
+                f'<td style="font-weight:500;font-size:13px">{s["nazwa"]}{brak_info}</td>'
+                f'<td style="text-align:right;font-weight:600">{round(p*100,1)}%</td>'
+                f'<td style="text-align:right;color:#5f5e5a;font-size:12px">'
+                f'{round(s["bialko"]*p,2) if s["bialko"] else "—"}</td>'
+                f'<td style="text-align:right;color:#5f5e5a;font-size:12px">'
+                f'{round(s["energia"]*p,0) if s["energia"] else "—"}</td>'
+                f'<td style="text-align:right;color:#5f5e5a;font-size:12px">'
+                f'{round(s["wapn"]*p*10,2) if s["wapn"] else "—"}</td>'
+                f'<td style="text-align:right;color:#5f5e5a;font-size:12px">'
+                f'{round(s["lizyna"]*p*10,2) if s["lizyna"] else "—"}</td>'
+                f'<td style="text-align:right;color:#888;font-size:12px">'
+                f'{round(s["cena_t"]*p,0) if s["cena_t"] else "—"}</td>'
+                f'</tr>'
+            )
+
+        # Wiersz sumy
+        skl_rows += (
+            f'<tr style="border-top:2px solid #e0ddd4;font-weight:700;background:#f5f5f0">'
+            f'<td style="font-size:13px">SUMA / WYPADKOWA</td>'
+            f'<td style="text-align:right">{round(W["suma_pct"]*100,1)}%</td>'
+            f'<td style="text-align:right;color:{"#3B6D11" if N["b_min"]<=W["bialko"]<=N["b_max"] else "#A32D2D"}">'
+            f'{round(W["bialko"],2)}</td>'
+            f'<td style="text-align:right;color:{"#3B6D11" if W["energia"]>=N["e_min"] else "#A32D2D"}">'
+            f'{round(W["energia"],0)}</td>'
+            f'<td style="text-align:right;color:{"#3B6D11" if N["ca_min"]<=W["wapn"]<=N["ca_max"] else "#A32D2D"}">'
+            f'{round(W["wapn"],2)}</td>'
+            f'<td style="text-align:right;color:{"#3B6D11" if W["lizyna"]>=N["liz_min"] else "#A32D2D"}">'
+            f'{round(W["lizyna"],2)}</td>'
+            f'<td style="text-align:right">{round(W["koszt"],0)}</td>'
+            f'</tr>'
+        )
+
+        # Paski normy
+        normy_rows = "".join(row for _,_,_,_,_,_,row in wskazniki)
+
+        # Rekomendacje HTML
+        rek_html = ""
+        for ico, tytul, opis in reks:
+            kol = {"🔴":"#A32D2D","🟡":"#BA7517","✅":"#3B6D11"}.get(ico,"#888")
+            rek_html += (
+                f'<div style="border-left:4px solid {kol};padding:10px 14px;'
+                f'border-radius:0 10px 10px 0;margin-bottom:10px;'
+                f'background:{"#FFF5F5" if ico=="🔴" else "#FAEEDA" if ico=="🟡" else "#F0F8E8"}">'
+                f'<div style="font-weight:600;font-size:13px;color:{kol}">{ico} {tytul}</div>'
+                f'<div style="font-size:13px;color:#5f5e5a;margin-top:4px;line-height:1.5">{opis}</div>'
+                f'</div>'
+            )
+
+        # Ocena ogólna
+        if zlych == 0:
+            ocena = '<div style="background:#EAF3DE;border-radius:10px;padding:12px 16px;text-align:center;font-weight:600;font-size:15px;color:#27500A">✅ Receptura w normach — wszystkie wskaźniki OK</div>'
+        elif zlych <= 2:
+            ocena = f'<div style="background:#FAEEDA;border-radius:10px;padding:12px 16px;text-align:center;font-weight:600;font-size:15px;color:#633806">⚠️ {zlych} wskaźnik{"i" if zlych>1 else ""} poza normą — sprawdź rekomendacje</div>'
+        else:
+            ocena = f'<div style="background:#FCEBEB;border-radius:10px;padding:12px 16px;text-align:center;font-weight:600;font-size:15px;color:#791F1F">🔴 {zlych} wskaźników poza normą — receptura wymaga korekty</div>'
+
+        html = (
+            f'<h1>Analityka paszy</h1>'
+            # Tabs receptur
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">{rec_tabs}</div>'
+            + ocena
+            + f'<div style="margin-top:12px;font-size:13px;color:#5f5e5a">Receptura: <b>{rec["nazwa"]}</b>'
+            + f' &nbsp;|&nbsp; Koszt: <b>{round(W["koszt"],0)} PLN/T</b>'
+            + f' &nbsp;|&nbsp; Stosunek Ca:P: <b style="color:{"#3B6D11" if 3.5<=ca_p<=6 else "#A32D2D"}">{ca_p}</b>'
+            + f' &nbsp;|&nbsp; Suma %: <b style="color:{"#3B6D11" if 0.99<=W["suma_pct"]<=1.01 else "#A32D2D"}">{round(W["suma_pct"]*100,1)}%</b>'
+            + f'</div>'
+
+            # Dwie kolumny: normy + rekomendacje
+            + '<div class="g2" style="margin-top:12px">'
+            + '<div class="card"><b>Normy dla niosek</b>'
+            + '<table style="margin-top:10px;width:100%"><thead><tr>'
+            + '<th style="font-size:12px">Wskaźnik</th>'
+            + '<th style="font-size:12px">Poziom</th>'
+            + '<th style="font-size:12px;text-align:right">Wartość</th>'
+            + '<th style="font-size:12px">Norma</th>'
+            + '<th style="font-size:12px">Status</th>'
+            + '<th style="font-size:12px">Info</th>'
+            + '</tr></thead>'
+            + f'<tbody>{normy_rows}</tbody></table>'
+            + '</div>'
+
+            + f'<div class="card"><b>Rekomendacje ({len(reks)})</b>'
+            + f'<div style="margin-top:10px">{rek_html}</div>'
+            + '</div>'
+            + '</div>'
+
+            # Tabela składników
+            + '<div class="card" style="margin-top:0;overflow-x:auto">'
+            + f'<b>Skład receptury — wkład każdego składnika</b>'
+            + '<table style="margin-top:10px;font-size:12px"><thead><tr>'
+            + '<th>Składnik</th>'
+            + '<th style="text-align:right">Udział</th>'
+            + '<th style="text-align:right">Białko%</th>'
+            + '<th style="text-align:right">ME kcal</th>'
+            + '<th style="text-align:right">Ca g/kg</th>'
+            + '<th style="text-align:right">Liz g/kg</th>'
+            + '<th style="text-align:right">Koszt PLN/T</th>'
+            + '</tr></thead>'
+            + f'<tbody>{skl_rows}</tbody></table>'
+            + '<p style="font-size:11px;color:#aaa;margin-top:6px">'
+            + 'Składniki bez danych w bazie oznaczone ?, dodaj je w '
+            + '<a href="/pasza/skladniki-baza" style="color:#534AB7">Bazie składników</a>.</p>'
+            + '</div>'
+
+            + '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+            + '<a href="/pasza/receptury" class="btn bo bsm">← Receptury</a>'
+            + '<a href="/pasza/skladniki-baza" class="btn bo bsm">Baza składników</a>'
+            + '<a href="/pasza/mieszalnik" class="btn bo bsm">Mieszalnik</a>'
+            + '</div>'
+        )
+        return R(html, "ana")
 
     @app.route("/pasza/skladniki-baza")
     @farm_required

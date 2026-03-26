@@ -593,7 +593,6 @@ def produkcja():
         '<td>' + str(round(r["jaja_zebrane"]/kur*100,1) if kur else 0) + '%</td>'
         '<td>' + str(r["jaja_sprzedane"]) + '</td>'
         '<td>' + str(round(r["jaja_sprzedane"]*(r["cena_sprzedazy"] or 0),2)) + ' zł</td>'
-        '<td>' + str(r["pasza_wydana_kg"]) + ' kg</td>'
         '<td style="color:#888;font-size:11px">' + (r["uwagi"] or "") + '</td></tr>'
         for r in rows
     )
@@ -601,7 +600,7 @@ def produkcja():
         '<h1>Produkcja</h1>'
         '<a href="/produkcja/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj wpis</a>'
         '<div class="card" style="overflow-x:auto"><table>'
-        '<thead><tr><th>Data</th><th>Zebrane</th><th>Nieśność</th><th>Sprzedane</th><th>Przychód</th><th>Pasza</th><th>Uwagi</th></tr></thead>'
+        '<thead><tr><th>Data</th><th>Zebrane</th><th>Nieśność</th><th>Sprzedane</th><th>Przychód</th><th>Uwagi</th></tr></thead>'
         '<tbody>' + (w or '<tr><td colspan=7 style="color:#888;text-align:center;padding:20px">Brak wpisów</td></tr>') + '</tbody></table></div>'
     )
     return R(html, "prod")
@@ -639,9 +638,9 @@ def produkcja_dodaj():
         '<div><label>Cena/szt (zł)</label><input name="cena_sprzedazy" type="number" step="0.01"></div>'
         '</div>'
         '<div class="g2">'
-        '<div><label>Pasza wydana (kg)</label><input name="pasza_wydana_kg" type="number" step="0.1" value="' + str(pdz) + '"></div>'
         '<div><label>Uwagi</label><input name="uwagi"></div>'
         '</div>'
+        '<input type="hidden" name="pasza_wydana_kg" value="' + str(pdz) + '">'
         '<br><button class="btn bp">Zapisz</button>'
         '<a href="/" class="btn bo" style="margin-left:8px">Anuluj</a>'
         '</form></div>'
