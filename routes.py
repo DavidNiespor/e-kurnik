@@ -1562,4 +1562,195 @@ def register_routes(app):
         return R(html,"pasza")
 
 
+
+    # ─── USTAWIENIA FARMY ────────────────────────────────────────────────────
+    @app.route("/ustawienia/farma", methods=["GET","POST"])
+    @farm_required
+    def ustawienia_farma():
+        g = gid()
+        if request.method == "POST":
+            sekcja = request.form.get("sekcja","")
+            if sekcja == "podstawowe":
+                for k in ["pasza_dzienna_kg","cena_jajka","etykieta_producent","etykieta_adres"]:
+                    v = request.form.get(k)
+                    if v is not None: save_setting(k, v.strip(), g)
+                flash("Ustawienia podstawowe zapisane.")
+            elif sekcja == "media":
+                for k in ["cena_wody_litra","cena_kwh"]:
+                    v = request.form.get(k)
+                    if v is not None: save_setting(k, v.strip(), g)
+                flash("Ceny mediów zapisane.")
+            elif sekcja == "supla":
+                save_setting("supla_webhook_token", request.form.get("supla_token","").strip(), g)
+                flash("Token Supla zapisany.")
+            return redirect("/ustawienia/farma")
+
+        def _v(k, d=""): return gs(k, d)
+        host = request.host
+        supla_token = _v("supla_webhook_token","")
+
+        db = get_db()
+        kanaly = db.execute("""
+            SELECT uc.kanal, uc.opis, uc.urzadzenie_id,
+                   u.nazwa as urz_nazwa,
+                   ks.tryb, ks.supla_channel_id, ks.esphome_entity, ks.gpio_pin
+            FROM urzadzenia_kanaly uc
+            JOIN urzadzenia u ON uc.urzadzenie_id = u.id
+            LEFT JOIN kanal_sterowanie ks
+                ON ks.urzadzenie_id = uc.urzadzenie_id AND ks.kanal = uc.kanal
+            WHERE u.gospodarstwo_id = ? AND u.aktywne = 1
+            ORDER BY u.nazwa, uc.kanal""", (g,)).fetchall()
+        supla_cfg = db.execute(
+            "SELECT s.*,u.nazwa as urz_nazwa FROM supla_config s "
+            "LEFT JOIN urzadzenia u ON s.powiazane_urzadzenie_id=u.id "
+            "WHERE s.gospodarstwo_id=? ORDER BY s.nazwa", (g,)).fetchall()
+        supla_log = db.execute(
+            "SELECT * FROM supla_log WHERE gospodarstwo_id=? ORDER BY czas DESC LIMIT 10", (g,)).fetchall()
+        db.close()
+
+        # Sekcja podstawowe
+        s_podst = (
+            '<div class="card"><b>Podstawowe</b>'
+            '<form method="POST" style="margin-top:10px">'
+            '<input type="hidden" name="sekcja" value="podstawowe">'
+            '<div class="g2">'
+            '<div><label>Dzienne zużycie paszy (kg)</label>'
+            '<input name="pasza_dzienna_kg" type="number" step="0.1" value="' + _v("pasza_dzienna_kg","6") + '"></div>'
+            '<div><label>Domyślna cena jajka (zł)</label>'
+            '<input name="cena_jajka" type="number" step="0.01" value="' + _v("cena_jajka","1.20") + '"></div>'
+            '<div><label>Producent (etykieta)</label>'
+            '<input name="etykieta_producent" value="' + _v("etykieta_producent","Ferma Jaj") + '"></div>'
+            '<div><label>Adres (etykieta)</label>'
+            '<input name="etykieta_adres" value="' + _v("etykieta_adres","") + '"></div>'
+            '</div>'
+            '<button class="btn bp bsm" style="margin-top:10px">Zapisz</button>'
+            '</form></div>'
+        )
+
+        # Sekcja media
+        s_media = (
+            '<div class="card"><b>Ceny mediów</b>'
+            '<form method="POST" style="margin-top:10px">'
+            '<input type="hidden" name="sekcja" value="media">'
+            '<div class="g2">'
+            '<div><label>Cena wody (zł/litr)</label>'
+            '<input name="cena_wody_litra" type="number" step="0.0001" value="' + _v("cena_wody_litra","0.005") + '"></div>'
+            '<div><label>Cena prądu (zł/kWh)</label>'
+            '<input name="cena_kwh" type="number" step="0.01" value="' + _v("cena_kwh","0.80") + '"></div>'
+            '</div>'
+            '<button class="btn bp bsm" style="margin-top:10px">Zapisz</button>'
+            '</form></div>'
+        )
+
+        # Sekcja Supla
+        w_supla = ""
+        for c in supla_cfg:
+            badge = 'b-green' if c["ostatni_stan"] else 'b-gray'
+            stan_txt = 'ON' if c["ostatni_stan"] else 'OFF'
+            w_supla += (
+                '<tr>'
+                '<td style="font-weight:500">' + c["nazwa"] + '</td>'
+                '<td><code>' + str(c["channel_id"] or "—") + '</code></td>'
+                '<td>' + (c["urz_nazwa"] or "—") + ' / ' + (c["powiazany_kanal"] or "—") + '</td>'
+                '<td><span class="badge ' + badge + '">' + stan_txt + '</span></td>'
+                '<td class="nowrap">'
+                '<a href="/supla/' + str(c["id"]) + '/edytuj" class="btn bo bsm">Edytuj</a> '
+                '<a href="/supla/' + str(c["id"]) + '/usun" class="btn br bsm" onclick="return confirm(\'Usunąć?\')">✕</a>'
+                '</td></tr>'
+            )
+        w_log = ""
+        for l in supla_log:
+            badge = 'b-green' if l["stan"] else 'b-gray'
+            w_log += (
+                '<tr>'
+                '<td style="font-size:11px">' + l["czas"][:16] + '</td>'
+                '<td><code>' + str(l["channel_id"] or "") + '</code></td>'
+                '<td>' + (l["action_raw"] or "") + '</td>'
+                '<td><span class="badge ' + badge + '">' + ('ON' if l["stan"] else 'OFF') + '</span></td>'
+                '</tr>'
+            )
+        log_html = ("")
+        if supla_log:
+            log_html = (
+                '<details style="margin-top:10px">'
+                '<summary style="cursor:pointer;font-size:13px;color:#534AB7">Log webhooków (' + str(len(supla_log)) + ')</summary>'
+                '<table style="font-size:12px;margin-top:6px"><thead><tr><th>Czas</th><th>Channel</th><th>Akcja</th><th>Stan</th></tr></thead>'
+                '<tbody>' + w_log + '</tbody></table></details>'
+            )
+        s_supla = (
+            '<div class="card"><b>Supla — webhook</b>'
+            '<div style="background:#EEEDFE;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px">'
+            'URL: <code style="background:#fff;padding:2px 8px;border-radius:4px">https://' + host + '/webhook/supla</code><br>'
+            'Supla Cloud → Kanał → Akcje bezpośrednie → POST<br>'
+            'Nagłówek: <code>X-Supla-Token: ' + (supla_token or "ustaw_poniżej") + '</code>'
+            '</div>'
+            '<form method="POST" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+            '<input type="hidden" name="sekcja" value="supla">'
+            '<input name="supla_token" value="' + supla_token + '" placeholder="Token bezpieczeństwa (opcjonalny)" style="flex:1">'
+            '<button class="btn bp bsm">Zapisz token</button></form>'
+            '<a href="/supla/dodaj" class="btn bp bsm" style="margin-bottom:10px">+ Dodaj kanał Supla</a>'
+            '<div style="overflow-x:auto"><table style="font-size:13px"><thead><tr>'
+            '<th>Nazwa</th><th>Channel ID</th><th>Urządzenie/Kanał</th><th>Stan</th><th></th>'
+            '</tr></thead><tbody>'
+            + (w_supla or '<tr><td colspan=5 style="color:#888;text-align:center;padding:12px">Brak kanałów Supla</td></tr>')
+            + '</tbody></table></div>'
+            + log_html
+            + '</div>'
+        )
+
+        # Sekcja GPIO
+        kol_map = {"reczny":"b-gray","supla":"b-amber","gpio_rpi":"b-green","esphome":"b-blue","gpio+supla":"b-purple","esphome+supla":"b-purple"}
+        ico_map = {"reczny":"🖱","supla":"⚡","gpio_rpi":"🔌","esphome":"📡","gpio+supla":"🔌⚡","esphome+supla":"📡⚡"}
+        w_kanaly = ""
+        for k in kanaly:
+            tryb = k["tryb"] or "reczny"
+            w_kanaly += (
+                '<tr>'
+                '<td>' + k["urz_nazwa"] + '</td>'
+                '<td><code>' + k["kanal"] + '</code></td>'
+                '<td style="color:#5f5e5a">' + (k["opis"] or "—") + '</td>'
+                '<td><span class="badge ' + kol_map.get(tryb,"b-gray") + '">'
+                + ico_map.get(tryb,"") + ' ' + tryb + '</span></td>'
+                '<td><a href="/sterowanie/kanal/' + str(k["urzadzenie_id"]) + '/' + k["kanal"] + '" class="btn bo bsm">Zmień</a></td>'
+                '</tr>'
+            )
+        kanaly_html = ""
+        if w_kanaly:
+            kanaly_html = (
+                '<div style="overflow-x:auto"><table style="font-size:13px;margin-top:8px">'
+                '<thead><tr><th>Urządzenie</th><th>Kanał</th><th>Opis</th><th>Tryb</th><th></th></tr></thead>'
+                '<tbody>' + w_kanaly + '</tbody></table></div>'
+            )
+        else:
+            kanaly_html = '<p style="color:#888;font-size:13px;margin-top:8px">Brak urządzeń. <a href="/urzadzenia/dodaj" style="color:#534AB7">Dodaj ESP32 lub RPi slave</a>.</p>'
+
+        s_gpio = (
+            '<div class="card">'
+            '<div style="display:flex;justify-content:space-between;align-items:center">'
+            '<b>GPIO / Sterowanie per kanał</b>'
+            '<a href="/sterowanie" class="btn bo bsm">Pełny panel</a>'
+            '</div>'
+            '<p style="font-size:12px;color:#888;margin:6px 0">'
+            'Tryby: ręczny / Supla / GPIO RPi / ESPHome / kombinacje.</p>'
+            + kanaly_html
+            + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+            '<a href="/urzadzenia/dodaj" class="btn bp bsm">+ Dodaj urządzenie</a>'
+            '<a href="/integracje/esphome" class="btn bo bsm">Konfiguracja ESPHome</a>'
+            '</div></div>'
+        )
+
+        s_skroty = (
+            '<div class="card"><b>Skróty</b>'
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+            '<a href="/import/xlsx" class="btn bo bsm">Import Chicken.xlsx</a>'
+            '<a href="/pasza/skladniki-baza" class="btn bo bsm">Baza składników</a>'
+            '<a href="/gpio/pwm" class="btn bo bsm">LED PWM</a>'
+            '<a href="/pojenie" class="btn bo bsm">Harmonogram pojenia</a>'
+            '</div></div>'
+        )
+
+        html = '<h1>Ustawienia farmy</h1>' + s_podst + s_media + s_supla + s_gpio + s_skroty
+        return R(html, "ust")
+
+
     return app

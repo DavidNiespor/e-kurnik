@@ -147,8 +147,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       <a href="/pojenie">Pojenie</a>
       <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
       <div class="nb-sep"></div>
-      <a href="/integracje/esphome">ESPHome</a>
-      <a href="/integracje/supla">Supla</a>
+      <a href="/ustawienia/farma">Ustawienia i integracje</a>
     </div>
   </div>
   <div class="nb-item">
@@ -166,8 +165,8 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       <span class="nb-link">{{ login }} <span class="arr">&#9660;</span></span>
       <div class="nb-drop" style="right:0;left:auto">
         <a href="/konto">Moje konto</a>
+        <a href="/ustawienia/farma">Ustawienia farmy</a>
         <a href="/import/xlsx">Import xlsx</a>
-        <a href="/ustawienia">Ustawienia</a>
         {% if rola == 'superadmin' %}
         <div class="nb-sep"></div>
         <a href="/admin" class="{{ 'on' if p=='admin' }}">Panel admina</a>
