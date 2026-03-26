@@ -113,7 +113,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
       <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
       <div class="nb-sep"></div>
-      <a href="/dzienne-czynnosci">Czynności dzienne</a>
+      <a href="/dzienne">Czynności dzienne</a>
     </div>
   </div>
   <div class="nb-item">
@@ -131,6 +131,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
     <div class="nb-drop">
       <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
       <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
+      <a href="/pasza/mieszalnik">Mieszalnik</a>
       <a href="/pasza/predykcja">Predykcja paszy</a>
       <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
       <a href="/energia">Energia</a>
@@ -554,6 +555,21 @@ def dashboard():
         + '</div>'
 
         + '</div>'  # end g2
+
+        # Formularz 3: Pasza + Woda
+        + '<div class="card" style="margin-top:4px">'  
+        + '<b>Pasza i woda — dziś</b>'
+        + '<form method="POST" action="/dzienne/media" style="margin-top:10px">'
+        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
+        + '<div class="g3">'
+        + '<div><label>Pasza dodana (kg)</label>'
+        + '<input name="pasza_kg" type="number" step="0.1" min="0" placeholder="kg"></div>'
+        + '<div><label>Woda dolana (litry)</label>'
+        + '<input name="woda_l" type="number" step="0.5" min="0" placeholder="L"></div>'
+        + '<div><label>Uwagi</label><input name="uwagi" placeholder="opcjonalnie"></div>'
+        + '</div>'
+        + '<button class="btn bo bsm" style="margin-top:8px">Zapisz mediów</button>'
+        + '</form></div>'
     )
     return R(html, "dash")
 

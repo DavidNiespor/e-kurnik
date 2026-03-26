@@ -2101,4 +2101,263 @@ def register_routes(app):
         return R(html, "zam")
 
 
+    # ─── DZIENNE MEDIA (pasza + woda z dashboardu) ────────────────────────────
+    @app.route("/dzienne/media", methods=["POST"])
+    @farm_required
+    def dzienne_media():
+        g = gid(); db = get_db()
+        d = request.form.get("data", date.today().isoformat())
+        pasza_kg = float(request.form.get("pasza_kg", 0) or 0)
+        woda_l   = float(request.form.get("woda_l",   0) or 0)
+        uwagi    = request.form.get("uwagi","")
+        cena_l   = float(gs("cena_wody_litra","0.005"))
+
+        if pasza_kg > 0:
+            # Aktualizuj wpis produkcji
+            ex = db.execute("SELECT id,pasza_wydana_kg FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,d)).fetchone()
+            if ex:
+                nowa = round((ex["pasza_wydana_kg"] or 0) + pasza_kg, 2)
+                db.execute("UPDATE produkcja SET pasza_wydana_kg=? WHERE id=?", (nowa, ex["id"]))
+            else:
+                db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg) VALUES(?,?,0,0,?)",
+                           (g, d, pasza_kg))
+
+        if woda_l > 0:
+            koszt = round(woda_l * cena_l, 2)
+            ex = db.execute("SELECT id,litry FROM woda_reczna WHERE gospodarstwo_id=? AND data=?", (g,d)).fetchone()
+            if ex:
+                db.execute("UPDATE woda_reczna SET litry=?,koszt=?,uwagi=? WHERE id=?",
+                           (round(ex["litry"]+woda_l,2), round((ex["litry"]+woda_l)*cena_l,2), uwagi, ex["id"]))
+            else:
+                db.execute("INSERT INTO woda_reczna(gospodarstwo_id,data,litry,cena_litra,koszt,uwagi) VALUES(?,?,?,?,?,?)",
+                           (g, d, woda_l, cena_l, koszt, uwagi))
+
+        db.commit(); db.close()
+        parts = []
+        if pasza_kg > 0: parts.append(f"{pasza_kg} kg paszy")
+        if woda_l > 0:   parts.append(f"{woda_l} L wody")
+        flash("Zapisano: " + ", ".join(parts) if parts else "Nic do zapisania.")
+        return redirect("/")
+
+    # ─── MIESZALNIK ───────────────────────────────────────────────────────────
+    @app.route("/pasza/mieszalnik", methods=["GET","POST"])
+    @farm_required
+    def pasza_mieszalnik():
+        g = gid(); db = get_db()
+
+        if request.method == "POST":
+            action = request.form.get("action","")
+            rid    = request.form.get("receptura_id")
+
+            if action == "rejestruj" and rid:
+                # Pobierz ilości z formularza i zarejestruj mieszanie
+                ilosc_kg = float(request.form.get("ilosc_kg", 0) or 0)
+                if ilosc_kg <= 0:
+                    flash("Podaj ilość paszy do zmieszania."); db.close(); return redirect("/pasza/mieszalnik")
+
+                # Odejmij z magazynu
+                sklady = db.execute(
+                    "SELECT rs.procent, rs.magazyn_id, sm.nazwa, sm.stan FROM receptura_skladnik rs "
+                    "JOIN stan_magazynu sm ON rs.magazyn_id=sm.id WHERE rs.receptura_id=?", (rid,)).fetchall()
+                braki = []
+                for s in sklady:
+                    potrzeba = round(ilosc_kg * float(s["procent"]), 2)
+                    if float(s["stan"] or 0) < potrzeba:
+                        braki.append(f"{s['nazwa']}: potrzeba {potrzeba} kg, jest {round(s['stan'],1)} kg")
+                if braki:
+                    flash("Brak składników: " + "; ".join(braki))
+                    db.close(); return redirect(f"/pasza/mieszalnik?rid={rid}&ilosc={ilosc_kg}")
+
+                for s in sklady:
+                    potrzeba = round(ilosc_kg * float(s["procent"]), 2)
+                    db.execute("UPDATE stan_magazynu SET stan=MAX(0,stan-?) WHERE id=?",
+                               (potrzeba, s["magazyn_id"]))
+
+                db.execute("INSERT INTO mieszania(gospodarstwo_id,data,receptura_id,ilosc_kg,uwagi) VALUES(?,?,?,?,?)",
+                           (g, datetime.now().isoformat(), rid, ilosc_kg,
+                            request.form.get("uwagi","")))
+                db.commit(); db.close()
+                flash(f"Zmieszano {ilosc_kg} kg paszy! Składniki odjęte z magazynu.")
+                return redirect("/pasza/mieszalnik")
+
+        # Dane do widoku
+        receptury = db.execute(
+            "SELECT * FROM receptura WHERE gospodarstwo_id=? ORDER BY aktywna DESC, nazwa", (g,)).fetchall()
+        rid_sel = int(request.args.get("rid", 0) or 0)
+        ilosc_arg = float(request.args.get("ilosc", 50) or 50)
+
+        if not rid_sel and receptury:
+            rid_sel = next((r["id"] for r in receptury if r["aktywna"]), receptury[0]["id"])
+
+        rec_sel = None; sklady = []; braki_info = []
+        if rid_sel:
+            rec_sel = db.execute("SELECT * FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid_sel, g)).fetchone()
+            sklady  = db.execute(
+                "SELECT rs.procent, sm.id as mid, sm.nazwa, sm.stan, sm.jednostka, sm.cena_aktualna "
+                "FROM receptura_skladnik rs JOIN stan_magazynu sm ON rs.magazyn_id=sm.id "
+                "WHERE rs.receptura_id=? ORDER BY rs.procent DESC", (rid_sel,)).fetchall()
+
+        # Ostatnie mieszania
+        historia = db.execute(
+            "SELECT m.*, r.nazwa as rn FROM mieszania m LEFT JOIN receptura r ON m.receptura_id=r.id "
+            "WHERE m.gospodarstwo_id=? ORDER BY m.data DESC LIMIT 10", (g,)).fetchall()
+        db.close()
+
+        # Opcje receptur
+        rec_opt = "".join(
+            f'<option value="{r["id"]}" {"selected" if r["id"]==rid_sel else ""}>'
+            f'{r["nazwa"]}{"  ✓" if r["aktywna"] else ""}</option>'
+            for r in receptury)
+
+        # Tabela składników z kalkulatorem
+        skl_rows = ""
+        if sklady:
+            for s in sklady:
+                potrzeba = round(ilosc_arg * float(s["procent"]), 2)
+                stan = float(s["stan"] or 0)
+                wystarczy = stan >= potrzeba
+                kol = "#3B6D11" if wystarczy else "#A32D2D"
+                icon = "✓" if wystarczy else "✗"
+                skl_rows += (
+                    '<tr>'
+                    '<td style="font-weight:500">' + s["nazwa"] + '</td>'
+                    '<td style="text-align:right">' + str(round(float(s["procent"])*100, 1)) + '%</td>'
+                    '<td style="text-align:right;font-weight:500;color:' + kol + '">'
+                    + str(potrzeba) + ' kg</td>'
+                    '<td style="text-align:right;color:' + kol + '">'
+                    + str(round(stan, 1)) + ' kg '
+                    + '<span style="font-size:16px">' + icon + '</span></td>'
+                    '<td style="text-align:right;color:#888">'
+                    + (str(round(stan / (float(s["procent"]) or 1), 0)) + ' kg max' if float(s["procent"]) > 0 else "—")
+                    + '</td>'
+                    '</tr>'
+                )
+
+        hist_rows = "".join(
+            '<tr><td style="font-size:12px">' + m["data"][:10] + '</td>'
+            '<td>' + (m["rn"] or "—") + '</td>'
+            '<td style="font-weight:500">' + str(round(m["ilosc_kg"], 1)) + ' kg</td>'
+            '<td style="color:#888;font-size:12px">' + (m["uwagi"] or "") + '</td></tr>'
+            for m in historia)
+
+        # Kalkulator JS
+        sklady_json = json.dumps([
+            {"procent": float(s["procent"]), "nazwa": s["nazwa"], "stan": float(s["stan"] or 0)}
+            for s in sklady
+        ])
+
+        # Max możliwa ilość (ograniczone przez składnik z najmniejszym zapasem)
+        max_mozliwe = 0
+        if sklady:
+            max_vals = []
+            for s in sklady:
+                pct = float(s["procent"])
+                if pct > 0:
+                    max_vals.append(float(s["stan"] or 0) / pct)
+            max_mozliwe = round(min(max_vals), 1) if max_vals else 0
+
+        html = (
+            '<h1>Mieszalnik paszy</h1>'
+            '<div class="g2">'
+
+            # Lewa: kalkulator
+            + '<div>'
+            + '<div class="card">'
+            + '<b>Oblicz proporcje</b>'
+            + '<form method="POST" id="calc-form" style="margin-top:10px">'
+            + '<input type="hidden" name="action" value="rejestruj">'
+            + '<label>Receptura</label>'
+            + '<select name="receptura_id" id="rec-sel" onchange="zmienRec(this.value)">'
+            + rec_opt + '</select>'
+
+            + '<div class="g2" style="margin-top:10px">'
+            + '<div><label>Ilość paszy do zmieszania (kg)</label>'
+            + '<input name="ilosc_kg" id="ilosc" type="number" step="1" min="1" max="500"'
+            + ' value="' + str(int(ilosc_arg)) + '" oninput="przelicz(this.value)">'
+            + '</div>'
+            + '<div><label>Maks. możliwe z magazynu</label>'
+            + '<div style="background:#EAF3DE;border-radius:8px;padding:10px;text-align:center;margin-top:4px">'
+            + '<span style="font-size:20px;font-weight:500;color:#3B6D11">' + str(max_mozliwe) + ' kg</span>'
+            + '</div></div>'
+            + '</div>'
+
+            + ('<div class="al ald" style="margin-top:8px">Brak receptur. <a href="/pasza/receptury">Dodaj recepturę</a>.</div>'
+               if not receptury else '')
+
+            + ('<table style="margin-top:12px;font-size:13px">'
+               '<thead><tr><th>Składnik</th><th style="text-align:right">%</th>'
+               '<th style="text-align:right">Potrzeba</th><th style="text-align:right">W magazynie</th>'
+               '<th style="text-align:right">Max partia</th></tr></thead>'
+               '<tbody id="skl-body">' + skl_rows + '</tbody>'
+               '</table>' if sklady else
+               '<p style="color:#888;font-size:13px;margin-top:10px">'
+               'Brak składników w recepturze. <a href="/pasza/receptury">Dodaj składniki</a>.</p>')
+
+            + ('<div style="margin-top:12px">'
+               '<label>Uwagi</label><input name="uwagi" placeholder="opcjonalnie">'
+               '<button class="btn bg" style="width:100%;margin-top:10px;padding:14px;font-size:16px">'
+               '⚗️ Zmieszaj i odejmij z magazynu</button>'
+               '</div>' if sklady else '')
+
+            + '</form></div>'
+
+            # Przycisk "ustaw ilość na max"
+            + ('<div class="card" style="margin-top:0">'
+               '<b>Szybkie kalkulacje</b>'
+               '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+               + "".join(f'<button type="button" class="btn bo bsm" onclick="setIlosc({v})">{v} kg</button>'
+                         for v in [10,25,50,100,200])
+               + f'<button type="button" class="btn bg bsm" onclick="setIlosc({max_mozliwe})">Max ({max_mozliwe} kg)</button>'
+               + '</div>'
+               + '<p style="font-size:12px;color:#888;margin-top:8px">Kliknij aby ustawić ilość i zobaczyć potrzebne składniki.</p>'
+               + '</div>' if sklady else '')
+
+            + '</div>'  # end lewa
+
+            # Prawa: historia
+            + '<div>'
+            + '<div class="card"><b>Historia mieszań</b>'
+            + ('<table style="margin-top:8px;font-size:13px"><thead><tr>'
+               '<th>Data</th><th>Receptura</th><th>Ilość</th><th>Uwagi</th>'
+               '</tr></thead><tbody>' + hist_rows + '</tbody></table>'
+               if historia else
+               '<p style="color:#888;font-size:13px;margin-top:8px">Brak historii</p>')
+            + '</div>'
+            + '</div>'
+
+            + '</div>'  # end g2
+
+            # Kalkulator JS
+            + '<script>'
+            + 'var _sklady=' + sklady_json + ';'
+            + 'function przelicz(ilosc){'
+            + '  ilosc=parseFloat(ilosc)||0;'
+            + '  var rows=document.getElementById("skl-body");'
+            + '  if(!rows)return;'
+            + '  var html="";'
+            + '  _sklady.forEach(function(s){'
+            + '    var potrzeba=Math.round(ilosc*s.procent*100)/100;'
+            + '    var ok=s.stan>=potrzeba;'
+            + '    var kol=ok?"#3B6D11":"#A32D2D";'
+            + '    var maxp=s.procent>0?Math.round(s.stan/s.procent*10)/10:0;'
+            + '    html+="<tr><td style=\'font-weight:500\'>"+s.nazwa+"</td>"'
+            + '      +"<td style=\'text-align:right\'>"+Math.round(s.procent*1000)/10+"%</td>"'
+            + '      +"<td style=\'text-align:right;font-weight:500;color:"+kol+"\'>"+potrzeba+" kg</td>"'
+            + '      +"<td style=\'text-align:right;color:"+kol+"\'>"+Math.round(s.stan*10)/10+" kg "+(ok?"✓":"✗")+"</td>"'
+            + '      +"<td style=\'text-align:right;color:#888\'>"+maxp+" kg max</td></tr>";'
+            + '  });'
+            + '  rows.innerHTML=html;'
+            + '}'
+            + 'function setIlosc(v){'
+            + '  var inp=document.getElementById("ilosc");'
+            + '  inp.value=v; przelicz(v);'
+            + '}'
+            + 'function zmienRec(rid){'
+            + '  window.location="/pasza/mieszalnik?rid="+rid+"&ilosc="+(document.getElementById("ilosc").value||50);'
+            + '}'
+            + '</script>'
+        )
+        return R(html, "pasza")
+
+
     return app
