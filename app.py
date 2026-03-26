@@ -23,14 +23,7 @@ from auth import (login_required, farm_required, superadmin_required,
 from devices import send_command, ping_device, ESP32_FIRMWARE
 
 # ─── MODUŁY ROZSZERZEŃ ───────────────────────────────────────────────────────
-from baza_skladnikow import init_skladniki_tables, seed_skladniki
-from fixes_v5 import register_fixes
-from dashboard_fixes import register_dashboard_fixes
-from routes_v5 import register_v5
-from supla_handler import register_supla_routes
-from fixes_v6 import register_v6
-from missing_routes import register_missing
-from sterowanie import register_sterowanie
+from routes import register_routes
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -1517,28 +1510,13 @@ def admin_config():
     return redirect("/admin")
 
 # ─── REJESTRACJA MODUŁÓW (route'y tylko — bez init DB) ──────────────────────
-register_fixes(app)
-register_dashboard_fixes(app)
-register_v5(app)
-register_supla_routes(app)
-register_v6(app)
-register_missing(app)
-register_sterowanie(app)
+register_routes(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 def startup():
-    """Inicjalizacja przy starcie — wywołana raz po załadowaniu Flask."""
     init_db()
     init_auth()
-    db = get_db()
-    # Tabele dodatkowe
-    from baza_skladnikow import init_skladniki_tables, seed_skladniki
-    init_skladniki_tables(db)
-    seed_skladniki(db)
-    from supla_handler import init_supla_tables
-    init_supla_tables(db)
-    db.commit()
-    db.close()
+
 
 if __name__ == "__main__":
     startup()
