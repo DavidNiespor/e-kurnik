@@ -582,72 +582,115 @@ def dashboard():
 @app.route("/produkcja")
 @farm_required
 def produkcja():
-    g = gid()
-    db = get_db()
-    rows = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 60", (g,)).fetchall()
-    kur  = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 50
+    g = gid(); db = get_db()
+    rows = db.execute("""SELECT p.*,k.nazwa as kn FROM produkcja p
+        LEFT JOIN klienci k ON p.klient_id=k.id
+        WHERE p.gospodarstwo_id=? ORDER BY p.data DESC LIMIT 90""", (g,)).fetchall()
+    kur  = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 1
     db.close()
-    w = "".join(
-        '<tr><td>' + r["data"] + '</td>'
-        '<td style="font-weight:500">' + str(r["jaja_zebrane"]) + '</td>'
-        '<td>' + str(round(r["jaja_zebrane"]/kur*100,1) if kur else 0) + '%</td>'
-        '<td>' + str(r["jaja_sprzedane"]) + '</td>'
-        '<td>' + str(round(r["jaja_sprzedane"]*(r["cena_sprzedazy"] or 0),2)) + ' zł</td>'
-        '<td style="color:#888;font-size:11px">' + (r["uwagi"] or "") + '</td></tr>'
-        for r in rows
-    )
+
+    w = ""
+    for r in rows:
+        niesn = round(r["jaja_zebrane"]/kur*100,1) if kur else 0
+        przych = round(r["jaja_sprzedane"]*(r["cena_sprzedazy"] or 0), 2)
+        kol_n = "#A32D2D" if niesn < 60 else "#BA7517" if niesn < 80 else "#3B6D11"
+        w += (
+            "<tr>"
+            "<td style='white-space:nowrap'>" + r["data"] + "</td>"
+            "<td style='font-weight:600;font-size:16px;text-align:center'>" + str(r["jaja_zebrane"]) + "</td>"
+            "<td style='color:" + kol_n + ";font-weight:500;text-align:center'>" + str(niesn) + "%</td>"
+            "<td style='text-align:center'>" + str(r["jaja_sprzedane"]) + "</td>"
+            "<td style='color:#888;font-size:12px'>" + (r["kn"] or "—") + "</td>"
+            "<td style='font-weight:500;color:#3B6D11'>" + str(przych) + " zł</td>"
+            "<td style='color:#888;font-size:11px'>" + (r["uwagi"] or "") + "</td>"
+            "<td class='nowrap'>"
+            "<a href='/produkcja/edytuj/" + r["data"] + "' class='btn bo bsm'>Edytuj</a>"
+            "</td></tr>"
+        )
+
     html = (
-        '<h1>Produkcja</h1>'
-        '<a href="/produkcja/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj wpis</a>'
-        '<div class="card" style="overflow-x:auto"><table>'
-        '<thead><tr><th>Data</th><th>Zebrane</th><th>Nieśność</th><th>Sprzedane</th><th>Przychód</th><th>Uwagi</th></tr></thead>'
-        '<tbody>' + (w or '<tr><td colspan=7 style="color:#888;text-align:center;padding:20px">Brak wpisów</td></tr>') + '</tbody></table></div>'
+        "<h1>Produkcja jaj</h1>"
+        "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
+        "<a href='/produkcja/dodaj-pelny' class='btn bp bsm'>+ Sprzedaż z klientem</a>"
+        "</div>"
+        "<div class='card' style='overflow-x:auto'>"
+        "<table><thead><tr>"
+        "<th>Data</th><th style='text-align:center'>Zebrane</th><th style='text-align:center'>Nieśność</th>"
+        "<th style='text-align:center'>Sprzedane</th><th>Klient</th><th>Przychód</th><th>Uwagi</th><th></th>"
+        "</tr></thead>"
+        "<tbody>" + (w or "<tr><td colspan=8 style='color:#888;text-align:center;padding:20px'>Brak wpisów</td></tr>") + "</tbody>"
+        "</table></div>"
     )
     return R(html, "prod")
 
-@app.route("/produkcja/dodaj", methods=["GET","POST"])
+
+@app.route("/produkcja/edytuj/<data>", methods=["GET","POST"])
 @farm_required
-def produkcja_dodaj():
-    g = gid()
+def produkcja_edytuj(data):
+    """Edycja / korekta wpisu z danego dnia — np. po stłuczeniu jaj."""
+    g = gid(); db = get_db()
+    r = db.execute("SELECT p.*,k.nazwa as kn FROM produkcja p LEFT JOIN klienci k ON p.klient_id=k.id WHERE p.gospodarstwo_id=? AND p.data=?", (g, data)).fetchone()
+    if not r: db.close(); flash("Nie znaleziono wpisu."); return redirect("/produkcja")
+    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    zamow = db.execute("SELECT z.id,z.data_dostawy,z.ilosc,k.nazwa as kn FROM zamowienia z LEFT JOIN klienci k ON z.klient_id=k.id WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone') ORDER BY z.data_dostawy", (g,)).fetchall()
+
     if request.method == "POST":
-        db = get_db()
-        d = request.form.get("data", date.today().isoformat())
-        v = (g, request.form.get("jaja_zebrane",0), request.form.get("jaja_sprzedane",0),
-             request.form.get("cena_sprzedazy",0), request.form.get("pasza_wydana_kg",0),
-             request.form.get("uwagi",""))
-        if db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,d)).fetchone():
-            db.execute("UPDATE produkcja SET jaja_zebrane=?,jaja_sprzedane=?,cena_sprzedazy=?,pasza_wydana_kg=?,uwagi=? WHERE gospodarstwo_id=? AND data=?",
-                       (request.form.get("jaja_zebrane",0), request.form.get("jaja_sprzedane",0),
-                        request.form.get("cena_sprzedazy",0), request.form.get("pasza_wydana_kg",0),
-                        request.form.get("uwagi",""), g, d))
-        else:
-            db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,uwagi) VALUES(?,?,?,?,?,?,?)",
-                       (g, d, request.form.get("jaja_zebrane",0), request.form.get("jaja_sprzedane",0),
-                        request.form.get("cena_sprzedazy",0), request.form.get("pasza_wydana_kg",0),
-                        request.form.get("uwagi","")))
+        jaja    = int(request.form.get("jaja_zebrane", r["jaja_zebrane"]) or 0)
+        sprzed  = int(request.form.get("jaja_sprzedane", r["jaja_sprzedane"]) or 0)
+        cena    = float(request.form.get("cena_sprzedazy", r["cena_sprzedazy"] or 0) or 0)
+        uwagi   = request.form.get("uwagi","")
+        kid     = request.form.get("klient_id") or None
+        zid     = request.form.get("zamowienie_id") or None
+        typ     = request.form.get("typ_sprzedazy","gotowka")
+        db.execute("UPDATE produkcja SET jaja_zebrane=?,jaja_sprzedane=?,cena_sprzedazy=?,uwagi=?,klient_id=?,zamowienie_id=?,typ_sprzedazy=? WHERE gospodarstwo_id=? AND data=?",
+                   (jaja, sprzed, cena, uwagi, kid, zid, typ, g, data))
         db.commit(); db.close()
-        flash("Wpis zapisany.")
-        return redirect("/")
-    pdz = gs("pasza_dzienna_kg","6")
+        flash("Wpis " + data + " zaktualizowany.")
+        return redirect("/produkcja")
+
+    db.close()
+    kl_opt = "<option value=''>— anonimowa —</option>" + "".join(
+        "<option value='" + str(k["id"]) + "' " + ("selected" if r["klient_id"]==k["id"] else "") + ">" + k["nazwa"] + "</option>"
+        for k in klienci)
+    zam_opt = "<option value=''>— bez zamówienia —</option>" + "".join(
+        "<option value='" + str(z["id"]) + "' " + ("selected" if r["zamowienie_id"]==z["id"] else "") + ">"
+        + (z["kn"] or "?") + " " + z["data_dostawy"] + " (" + str(z["ilosc"]) + " szt.)</option>"
+        for z in zamow)
+    typ_opt = "".join(
+        "<option value='" + v + "' " + ("selected" if (dict(r).get("typ_sprzedazy") or "")==v else "") + ">" + l + "</option>"
+        for v,l in [("gotowka","Gotówka"),("przelew","Przelew"),("z_salda","Z salda"),("nastepnym_razem","Następnym razem")])
+
     html = (
-        '<h1>Dodaj wpis produkcji</h1><div class="card"><form method="POST">'
-        '<label>Data</label><input name="data" type="date" value="' + date.today().isoformat() + '">'
-        '<div class="g3">'
-        '<div><label>Zebrane jaja</label><input name="jaja_zebrane" type="number" min="0"></div>'
-        '<div><label>Sprzedane</label><input name="jaja_sprzedane" type="number" value="0"></div>'
-        '<div><label>Cena/szt (zł)</label><input name="cena_sprzedazy" type="number" step="0.01"></div>'
-        '</div>'
-        '<div class="g2">'
-        '<div><label>Uwagi</label><input name="uwagi"></div>'
-        '</div>'
-        '<input type="hidden" name="pasza_wydana_kg" value="' + str(pdz) + '">'
-        '<br><button class="btn bp">Zapisz</button>'
-        '<a href="/" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
+        "<h1>Edytuj wpis — " + data + "</h1>"
+        "<div class='card'><form method='POST'>"
+        "<div class='al alw'>Edytujesz dane z <b>" + data + "</b>. "
+        "Przydatne np. gdy jaja się stłukły po przeliczeniu lub pomyłka w zapisie.</div>"
+        "<div class='g2' style='margin-top:12px'>"
+        "<div><label>Zebrane jaja (szt)</label>"
+        "<input name='jaja_zebrane' type='number' min='0' value='" + str(r["jaja_zebrane"]) + "' style='font-size:22px;text-align:center'></div>"
+        "<div><label>Sprzedane (szt)</label>"
+        "<input name='jaja_sprzedane' type='number' min='0' value='" + str(r["jaja_sprzedane"]) + "' id='sp' oninput='cW()' style='font-size:22px;text-align:center'></div>"
+        "</div>"
+        "<div class='g2' style='margin-top:8px'>"
+        "<div><label>Cena/szt (zł)</label>"
+        "<input name='cena_sprzedazy' type='number' step='0.01' value='" + str(r["cena_sprzedazy"] or "") + "' id='cn' oninput='cW()'></div>"
+        "<div style='padding-top:20px'><div style='background:#f5f5f0;border-radius:8px;padding:8px 12px;font-size:14px'>Wartość: <b id='wrt'>0.00 zł</b></div></div>"
+        "</div>"
+        "<div class='g2' style='margin-top:8px'>"
+        "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
+        "<div><label>Typ płatności</label><select name='typ_sprzedazy'>" + typ_opt + "</select></div>"
+        "</div>"
+        "<label>Powiązane zamówienie</label><select name='zamowienie_id'>" + zam_opt + "</select>"
+        "<label style='margin-top:8px'>Uwagi / powód korekty</label>"
+        "<input name='uwagi' value='" + (r["uwagi"] or "") + "' placeholder='np. stłukło się 3 jaja po przeliczeniu'>"
+        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz korektę</button>"
+        "<a href='/produkcja' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+        "</form></div>"
+        "<script>function cW(){var s=parseFloat(document.getElementById('sp').value)||0,c=parseFloat(document.getElementById('cn').value)||0;document.getElementById('wrt').textContent=(s*c).toFixed(2)+' zł';}cW();</script>"
     )
     return R(html, "prod")
 
-# ─── STADO ────────────────────────────────────────────────────────────────────
+
 @app.route("/stado")
 @farm_required
 def stado():
@@ -1114,44 +1157,174 @@ def wydatki_usun(wid):
 # ─── PASZA ────────────────────────────────────────────────────────────────────
 @app.route("/pasza")
 @farm_required
+
 def pasza():
-    g = gid()
-    db = get_db()
+    g = gid(); db = get_db()
     skladniki = db.execute("SELECT * FROM stan_magazynu WHERE gospodarstwo_id=? AND kategoria IN ('Zboże/pasza','Witaminy/suplementy') ORDER BY nazwa", (g,)).fetchall()
-    mieszania = db.execute("SELECT m.*,r.nazwa as rn FROM mieszania m LEFT JOIN receptura r ON m.receptura_id=r.id WHERE m.gospodarstwo_id=? ORDER BY m.data DESC LIMIT 15", (g,)).fetchall()
-    receptury = db.execute("SELECT * FROM receptura WHERE gospodarstwo_id=? ORDER BY aktywna DESC, nazwa", (g,)).fetchall()
+    mieszania = db.execute("SELECT m.*,r.nazwa as rn FROM mieszania m LEFT JOIN receptura r ON m.receptura_id=r.id WHERE m.gospodarstwo_id=? ORDER BY m.data DESC LIMIT 30", (g,)).fetchall()
     db.close()
-    pdz = float(gs("pasza_dzienna_kg","6"))
-    w_skl = "".join(
-        '<tr><td>' + s["nazwa"] + '</td>'
-        '<td style="font-weight:500;color:' + ('#A32D2D' if s["stan"]<s["min_zapas"] and s["min_zapas"]>0 else '#2c2c2a') + '">' + str(round(s["stan"],1)) + ' ' + s["jednostka"] + '</td>'
-        '<td>' + str(round(s["cena_aktualna"],2)) + ' zł</td>'
-        '<td><a href="/wydatki/dodaj?nazwa=' + s["nazwa"] + '&kategoria=' + s["kategoria"] + '&next=/pasza" class="btn bp bsm">+ Zakup</a></td></tr>'
-        for s in skladniki
-    )
-    w_mies = "".join(
-        '<tr><td>' + m["data"][:10] + '</td><td>' + (m["rn"] or "—") + '</td>'
-        '<td style="font-weight:500">' + str(round(m["ilosc_kg"],1)) + ' kg</td>'
-        '<td style="color:#888;font-size:11px">' + (m["uwagi"] or "") + '</td></tr>'
-        for m in mieszania
-    )
+    w_skl = ""
+    for s in skladniki:
+        niski = s["stan"] < (s["min_zapas"] or 0) and (s["min_zapas"] or 0) > 0
+        kol = "#A32D2D" if niski else "#2c2c2a"
+        alert = " ⚠️" if niski else ""
+        w_skl += (
+            "<tr>"
+            "<td style='font-weight:500'>" + s["nazwa"] + alert + "</td>"
+            "<td style='font-weight:600;color:" + kol + "'>" + str(round(s["stan"],1)) + " " + s["jednostka"] + "</td>"
+            "<td style='color:#888'>" + str(round(s["cena_aktualna"],2)) + " zł/kg</td>"
+            "<td class='nowrap'>"
+            "<a href='/magazyn/korekta/" + str(s["id"]) + "' class='btn bo bsm'>Korekta</a> "
+            "<a href='/wydatki/dodaj?nazwa=" + s["nazwa"] + "&kategoria=" + s["kategoria"] + "&next=/pasza' class='btn bp bsm'>+ Zakup</a>"
+            "</td></tr>"
+        )
+    w_mies = ""
+    for m in mieszania:
+        w_mies += (
+            "<tr>"
+            "<td style='font-size:12px;color:#888'>" + m["data"][:10] + "</td>"
+            "<td>" + (m["rn"] or "—") + "</td>"
+            "<td style='font-weight:600'>" + str(round(m["ilosc_kg"],1)) + " kg</td>"
+            "<td style='color:#888;font-size:11px'>" + (m["uwagi"] or "") + "</td>"
+            "<td class='nowrap'>"
+            "<a href='/pasza/mieszanie/" + str(m["id"]) + "/edytuj' class='btn bo bsm'>Edytuj</a> "
+            "<a href='/pasza/mieszanie/" + str(m["id"]) + "/usun' class='btn br bsm' onclick=\"return confirm('Usunąć? Składniki wrócą do magazynu.')\">✕</a>"
+            "</td></tr>"
+        )
     html = (
-        '<h1>Pasza</h1>'
-        '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
-        '<a href="/pasza/mieszaj" class="btn bp bsm">+ Zarejestruj mieszanie</a>'
-        '<a href="/pasza/receptury" class="btn bo bsm">Receptury</a>'
-        '</div>'
-        '<div class="g2">'
-        '<div class="card"><b>Składniki w magazynie</b>'
-        '<p style="font-size:12px;color:#888;margin:4px 0 8px">Zakup przez <a href="/wydatki/dodaj" style="color:#534AB7">Wydatki</a></p>'
-        '<div style="overflow-x:auto"><table><thead><tr><th>Składnik</th><th>Stan</th><th>Cena</th><th></th></tr></thead>'
-        '<tbody>' + (w_skl or '<tr><td colspan=4 style="color:#888;padding:12px">Brak — dodaj przez Wydatki (Zboże/pasza)</td></tr>') + '</tbody></table></div></div>'
-        '<div class="card"><b>Historia mieszań</b>'
-        '<div style="overflow-x:auto"><table style="margin-top:8px"><thead><tr><th>Data</th><th>Receptura</th><th>Partia</th><th>Uwagi</th></tr></thead>'
-        '<tbody>' + (w_mies or '<tr><td colspan=4 style="color:#888;padding:12px">Brak historii</td></tr>') + '</tbody></table></div></div>'
-        '</div>'
+        "<h1>Pasza</h1>"
+        "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
+        "<a href='/pasza/mieszaj' class='btn bp bsm'>+ Zarejestruj mieszanie</a>"
+        "<a href='/pasza/mieszalnik' class='btn bg bsm'>⚗️ Mieszalnik</a>"
+        "<a href='/pasza/receptury' class='btn bo bsm'>Receptury</a>"
+        "<a href='/pasza/analityka' class='btn bo bsm'>Analityka</a>"
+        "</div>"
+        "<div class='g2'>"
+        "<div class='card'><b>Składniki w magazynie</b>"
+        "<div style='overflow-x:auto'><table style='margin-top:8px'><thead><tr>"
+        "<th>Składnik</th><th>Stan</th><th>Cena/kg</th><th></th>"
+        "</tr></thead>"
+        "<tbody>" + (w_skl or "<tr><td colspan=4 style='color:#888;padding:12px'>Brak — dodaj przez Wydatki → Zboże/pasza</td></tr>") + "</tbody>"
+        "</table></div>"
+        "<a href='/wydatki/dodaj?kategoria=Zboże%2Fpasza&next=/pasza' class='btn bo bsm' style='display:inline-block;margin-top:10px'>+ Dodaj zakup składnika</a>"
+        "</div>"
+        "<div class='card'><b>Historia mieszań</b>"
+        "<div style='overflow-x:auto'><table style='margin-top:8px'><thead><tr>"
+        "<th>Data</th><th>Receptura</th><th>Ilość</th><th>Uwagi</th><th></th>"
+        "</tr></thead>"
+        "<tbody>" + (w_mies or "<tr><td colspan=5 style='color:#888;padding:12px'>Brak historii</td></tr>") + "</tbody>"
+        "</table></div></div>"
+        "</div>"
     )
     return R(html, "pasza")
+
+
+@app.route("/magazyn/korekta/<int:sid>", methods=["GET","POST"])
+@farm_required
+def magazyn_korekta(sid):
+    g = gid(); db = get_db()
+    s = db.execute("SELECT * FROM stan_magazynu WHERE id=? AND gospodarstwo_id=?", (sid, g)).fetchone()
+    if not s: db.close(); return redirect("/pasza")
+    if request.method == "POST":
+        nowy = float(request.form.get("stan", s["stan"]) or 0)
+        cena = float(request.form.get("cena", s["cena_aktualna"]) or 0)
+        roznica = nowy - float(s["stan"] or 0)
+        db.execute("UPDATE stan_magazynu SET stan=?,cena_aktualna=? WHERE id=?", (nowy, cena, sid))
+        if abs(roznica) > 0.01:
+            db.execute("INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,cena_jednostkowa,wartosc_total,uwagi) VALUES(?,?,?,?,?,?,?,?,?)",
+                (g, date.today().isoformat(), s["kategoria"], s["nazwa"],
+                 abs(roznica), s["jednostka"], cena, abs(roznica)*cena,
+                 request.form.get("powod","korekta")))
+        db.commit(); db.close()
+        flash("Korekta zapisana: " + s["nazwa"] + " → " + str(nowy) + " " + s["jednostka"])
+        return redirect("/pasza")
+    db.close()
+    html = (
+        "<h1>Korekta stanu: " + s["nazwa"] + "</h1>"
+        "<div class='card'><form method='POST'>"
+        "<div class='al alw'>Aktualny stan w systemie: <b>" + str(round(float(s["stan"]),1)) + " " + s["jednostka"] + "</b><br>"
+        "Wpisz stan rzeczywisty po przeliczeniu. Różnica zostanie zapisana w wydatkach.</div>"
+        "<div class='g2' style='margin-top:12px'>"
+        "<div><label>Stan rzeczywisty (" + s["jednostka"] + ")</label>"
+        "<input name='stan' type='number' step='0.1' value='" + str(round(float(s["stan"]),1)) + "' required style='font-size:22px;text-align:center'></div>"
+        "<div><label>Cena aktualna (zł/kg)</label>"
+        "<input name='cena' type='number' step='0.01' value='" + str(round(float(s["cena_aktualna"]),2)) + "'></div>"
+        "</div>"
+        "<label style='margin-top:10px'>Powód korekty</label>"
+        "<select name='powod'>"
+        "<option value='inwentaryzacja'>Inwentaryzacja — przeliczenie ręczne</option>"
+        "<option value='ubytki naturalne'>Ubytki naturalne (wilgoć, rozsyp)</option>"
+        "<option value='korekta pomyłki'>Korekta wcześniejszej pomyłki</option>"
+        "<option value='dosypanie bez paragonu'>Dosypanie bez paragonu</option>"
+        "</select>"
+        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz korektę</button>"
+        "<a href='/pasza' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+        "</form></div>"
+    )
+    return R(html, "pasza")
+
+
+@app.route("/pasza/mieszanie/<int:mid>/edytuj", methods=["GET","POST"])
+@farm_required
+def pasza_mieszanie_edytuj(mid):
+    g = gid(); db = get_db()
+    m = db.execute("SELECT * FROM mieszania WHERE id=? AND gospodarstwo_id=?", (mid, g)).fetchone()
+    if not m: db.close(); return redirect("/pasza")
+    recs = db.execute("SELECT * FROM receptura WHERE gospodarstwo_id=? ORDER BY aktywna DESC,nazwa", (g,)).fetchall()
+    if request.method == "POST":
+        nowa = float(request.form.get("ilosc_kg", m["ilosc_kg"]) or 0)
+        stara = float(m["ilosc_kg"] or 0)
+        roznica = nowa - stara
+        rid = request.form.get("receptura_id") or m["receptura_id"]
+        if abs(roznica) > 0.01 and rid:
+            for s in db.execute("SELECT * FROM receptura_skladnik WHERE receptura_id=?", (rid,)).fetchall():
+                korekta = roznica * float(s["procent"]) / 100
+                db.execute("UPDATE stan_magazynu SET stan=MAX(0,stan-?) WHERE id=? AND gospodarstwo_id=?",
+                           (korekta, s["magazyn_id"], g))
+        db.execute("UPDATE mieszania SET receptura_id=?,ilosc_kg=?,uwagi=? WHERE id=? AND gospodarstwo_id=?",
+                   (rid, nowa, request.form.get("uwagi",""), mid, g))
+        db.commit(); db.close()
+        diff_str = (", korekta magazynu: " + ("+" if roznica>0 else "") + str(round(roznica,1)) + " kg") if abs(roznica)>0.01 else ""
+        flash("Mieszanie zaktualizowane" + diff_str + ".")
+        return redirect("/pasza")
+    opt = "".join(
+        "<option value='" + str(r["id"]) + "' " + ("selected" if r["id"]==m["receptura_id"] else "") + ">"
+        + ("✓ " if r["aktywna"] else "") + r["nazwa"] + "</option>"
+        for r in recs)
+    db.close()
+    html = (
+        "<h1>Edytuj mieszanie</h1>"
+        "<div class='card'><form method='POST'>"
+        "<div class='al alw'>Zmiana ilości automatycznie koryguje stan magazynu o różnicę.</div>"
+        "<label style='margin-top:12px'>Data</label>"
+        "<input value='" + m["data"][:10] + "' disabled style='color:#888;background:#f5f5f0'>"
+        "<label>Receptura</label><select name='receptura_id'>" + opt + "</select>"
+        "<label>Ilość paszy (kg)</label>"
+        "<input name='ilosc_kg' type='number' step='0.5' value='" + str(round(float(m["ilosc_kg"]),1)) + "' required style='font-size:22px;text-align:center'>"
+        "<label>Uwagi</label><input name='uwagi' value='" + (m["uwagi"] or "") + "'>"
+        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz zmiany</button>"
+        "<a href='/pasza' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+        "</form></div>"
+    )
+    return R(html, "pasza")
+
+
+@app.route("/pasza/mieszanie/<int:mid>/usun")
+@farm_required
+def pasza_mieszanie_usun(mid):
+    g = gid(); db = get_db()
+    m = db.execute("SELECT * FROM mieszania WHERE id=? AND gospodarstwo_id=?", (mid, g)).fetchone()
+    if m:
+        if m["receptura_id"]:
+            for s in db.execute("SELECT * FROM receptura_skladnik WHERE receptura_id=?", (m["receptura_id"],)).fetchall():
+                zwrot = float(m["ilosc_kg"] or 0) * float(s["procent"]) / 100
+                db.execute("UPDATE stan_magazynu SET stan=stan+? WHERE id=? AND gospodarstwo_id=?",
+                           (zwrot, s["magazyn_id"], g))
+        db.execute("DELETE FROM mieszania WHERE id=?", (mid,))
+        db.commit()
+        flash("Mieszanie usunięto — składniki zwrócono do magazynu.")
+    db.close(); return redirect("/pasza")
+
 
 @app.route("/pasza/mieszaj", methods=["GET","POST"])
 @farm_required

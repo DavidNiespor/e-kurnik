@@ -90,6 +90,9 @@ def init_db():
         jaja_sprzedane INTEGER DEFAULT 0,
         cena_sprzedazy REAL DEFAULT 0,
         pasza_wydana_kg REAL DEFAULT 0,
+        klient_id INTEGER REFERENCES klienci(id),
+        zamowienie_id INTEGER REFERENCES zamowienia(id),
+        typ_sprzedazy TEXT DEFAULT 'gotowka',
         uwagi TEXT,
         UNIQUE(gospodarstwo_id, data)
     );
@@ -347,4 +350,13 @@ def init_db():
         aktywny INTEGER DEFAULT 1
     );
     """)
+    # Migracje dla istniejących baz (starsze wersje bez tych kolumn)
+    for _col in [
+        "ALTER TABLE produkcja ADD COLUMN klient_id INTEGER REFERENCES klienci(id)",
+        "ALTER TABLE produkcja ADD COLUMN zamowienie_id INTEGER REFERENCES zamowienia(id)",
+        "ALTER TABLE produkcja ADD COLUMN typ_sprzedazy TEXT DEFAULT 'gotowka'",
+        "ALTER TABLE kanal_sterowanie ADD COLUMN kategoria TEXT DEFAULT 'inne'",
+    ]:
+        try: db.execute(_col); db.commit()
+        except: pass
     db.commit(); db.close()

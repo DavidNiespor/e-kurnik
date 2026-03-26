@@ -11,13 +11,16 @@ from datetime import datetime, date, timedelta
 import io, json, threading, os, urllib.request
 
 _TRYBY = [
-    ("reczny",        "Ręczny (tylko panel)"),
-    ("supla",         "Supla webhook"),
-    ("gpio_rpi",      "GPIO RPi bezpośrednie"),
-    ("esphome",       "ESPHome REST"),
-    ("gpio+supla",    "GPIO RPi + Supla"),
-    ("esphome+supla", "ESPHome + Supla"),
+    # (wartość, label, opis, ikona)
+    ("reczny",   "Ręczny",             "Tylko sterowanie z panelu aplikacji",                        "🖱️"),
+    ("rpi_gpio", "RPi GPIO",           "Bezpośrednie piny GPIO na tym samym RPi co aplikacja",       "🔌"),
+    ("rpi_siec", "RPi po sieci",       "Inny RPi lub ESP32 w tej samej sieci WiFi — HTTP REST",     "📡"),
+    ("esphome",  "ESPHome",            "Urządzenie ESPHome w sieci lokalnej — REST API",             "⚡"),
+    ("supla",    "Supla Cloud",        "Sterowanie przez Supla Cloud — wymaga internetu",             "☁️"),
+    ("supla+rpi","Supla + RPi",        "Supla steruje + lokalne GPIO jako backup offline",           "☁️🔌"),
 ]
+# Uproszczona lista do formularzy (wartość, opis)
+_TRYBY_OPT = [(t[0], t[1]) for t in _TRYBY]
 
 _CZYN = [
     ("poidla","Poidła","💧"), ("karmidla","Karmidła","🌾"), ("pasza","Pasza","🌽"),
@@ -214,6 +217,9 @@ def register_routes(app):
         for col in ["klient_id INTEGER", "zamowienie_id INTEGER", "typ_sprzedazy TEXT DEFAULT 'gotowka'"]:
             try: db.execute(f"ALTER TABLE produkcja ADD COLUMN {col}"); db.commit()
             except: pass
+        # Kolumna kategoria w kanal_sterowanie
+        try: db.execute("ALTER TABLE kanal_sterowanie ADD COLUMN kategoria TEXT DEFAULT 'inne'"); db.commit()
+        except: pass
         # Kolumny receptura - sezon
         for col in ["sezon_stosowania TEXT DEFAULT ''", "miesiac_od TEXT DEFAULT ''", "miesiac_do TEXT DEFAULT ''"]:
             try: db.execute(f"ALTER TABLE receptura ADD COLUMN {col}"); db.commit()
@@ -693,82 +699,93 @@ def register_routes(app):
         return R(html,"gpio")
 
     # ─── STEROWANIE (tryby per kanał) ─────────────────────────────────────────
-    _TRYBY = [
-        ("reczny",        "Ręczny (tylko panel)"),
-        ("supla",         "Supla webhook"),
-        ("gpio_rpi",      "GPIO RPi bezpośrednie"),
-        ("esphome",       "ESPHome REST"),
-        ("gpio+supla",    "GPIO RPi + Supla"),
-        ("esphome+supla", "ESPHome + Supla"),
-    ]
+    # _TRYBY zdefiniowane globalnie powyżej register_routes
+    _TRYBY_OPT_LOCAL = [(t[0], t[1]) for t in _TRYBY]
 
     @app.route("/sterowanie")
     @farm_required
     def sterowanie():
         g = gid(); db = get_db()
         kanaly = db.execute("""
-            SELECT uc.*, uc.urzadzenie_id,
-                   u.nazwa as urz_nazwa, u.typ as urz_typ,
-                   ks.tryb, ks.supla_channel_id, ks.esphome_entity,
-                   ks.gpio_pin, ks.opis as kopis
+            SELECT uc.kanal, uc.stan, uc.opis, uc.urzadzenie_id,
+                   u.nazwa as urz_nazwa, u.typ as urz_typ, u.ip, u.port,
+                   ks.tryb, ks.opis as k_opis, ks.kategoria
             FROM urzadzenia_kanaly uc
             JOIN urzadzenia u ON uc.urzadzenie_id = u.id
             LEFT JOIN kanal_sterowanie ks
-                ON ks.urzadzenie_id = uc.urzadzenie_id AND ks.kanal = uc.kanal
-            WHERE u.gospodarstwo_id = ? AND u.aktywne = 1
+                ON ks.urzadzenie_id=uc.urzadzenie_id AND ks.kanal=uc.kanal
+            WHERE u.gospodarstwo_id=? AND u.aktywne=1
             ORDER BY u.nazwa, uc.kanal""", (g,)).fetchall()
-        # Pobierz aktywne harmonogramy per kanał
-        harm = db.execute(
-            "SELECT urzadzenie_id, kanal, COUNT(*) as n FROM harmonogramy "
-            "WHERE gospodarstwo_id=? AND aktywny=1 GROUP BY urzadzenie_id, kanal", (g,)).fetchall()
-        harm_map = {(h["urzadzenie_id"], h["kanal"]): h["n"] for h in harm}
+        harm_cnt = {
+            (h["urzadzenie_id"], h["kanal"]): h["n"]
+            for h in db.execute(
+                "SELECT urzadzenie_id,kanal,COUNT(*) as n FROM harmonogramy "
+                "WHERE gospodarstwo_id=? AND aktywny=1 GROUP BY urzadzenie_id,kanal", (g,)).fetchall()
+        }
         db.close()
 
-        kol = {"reczny":"b-gray","supla":"b-amber","gpio_rpi":"b-green",
-               "esphome":"b-blue","gpio+supla":"b-purple","esphome+supla":"b-purple"}
-        ico = {"reczny":"🖱","supla":"⚡","gpio_rpi":"🔌","esphome":"📡","gpio+supla":"🔌⚡","esphome+supla":"📡⚡"}
+        kat_ico = {"swiatlo":"💡","brama":"🚪","grzanie":"🔥","wentylacja":"💨","pojenie":"💧","inne":"⚡","":"⚡"}
+        tryb_info = {t[0]: t for t in _TRYBY}
 
-        rows_html = ""
+        rows = ""
         for k in kanaly:
             tryb = k["tryb"] or "reczny"
-            hn = harm_map.get((k["urzadzenie_id"], k["kanal"]), 0)
-            rows_html += (
-                '<tr>'
-                '<td style="font-weight:500">' + k["urz_nazwa"] + '</td>'
-                '<td><code>' + k["kanal"] + '</code></td>'
-                '<td>' + (k["kopis"] or k["opis"] or "—") + '</td>'
-                '<td><span class="badge ' + kol.get(tryb,"b-gray") + '">'
-                + ico.get(tryb,"") + ' ' + tryb + '</span>'
-                + (' <span style="font-size:10px;color:#534AB7">⏰×' + str(hn) + '</span>' if hn else '')
-                + '</td>'
-                '<td class="nowrap">'
-                '<a href="/sterowanie/kanal/' + str(k["urzadzenie_id"]) + '/' + k["kanal"] + '" class="btn bo bsm">Konfiguruj</a>'
-                '</td></tr>'
+            ti   = tryb_info.get(tryb, _TRYBY[0])
+            opis = k["k_opis"] or k["opis"] or k["kanal"]
+            kat  = k["kategoria"] or ""
+            ico  = kat_ico.get(kat, "⚡")
+            on   = bool(k["stan"])
+            hn   = harm_cnt.get((k["urzadzenie_id"], k["kanal"]), 0)
+
+            rows += (
+                "<tr>"
+                "<td style='font-size:18px'>" + ico + "</td>"
+                "<td style='font-weight:500'>" + opis + "<br>"
+                "<span style='font-size:11px;color:#888'>" + k["urz_nazwa"] + " / " + k["kanal"] + "</span></td>"
+                "<td><span style='font-size:13px'>" + ti[3] + " " + ti[1] + "</span><br>"
+                "<span style='font-size:11px;color:#888'>" + ti[2][:40] + "</span></td>"
+                "<td><span class='badge " + ("b-green" if on else "b-gray") + "'>" + ("ON" if on else "OFF") + "</span>"
+                + (" <span style='font-size:11px;color:#534AB7'>⏰×" + str(hn) + "</span>" if hn else "")
+                + "</td>"
+                "<td class='nowrap'>"
+                "<button class='btn " + ("br" if on else "bg") + " bsm' onclick='tR(" + str(k["urzadzenie_id"]) + "," + repr(k["kanal"]) + "," + ("false" if on else "true") + ")'>"
+                + ("OFF" if on else "ON") + "</button> "
+                "<a href='/sterowanie/kanal/" + str(k["urzadzenie_id"]) + "/" + k["kanal"] + "' class='btn bo bsm'>⚙</a>"
+                "</td>"
+                "</tr>"
             )
 
-        info = "".join(
-            '<div style="padding:3px 0;font-size:13px">'
-            '<span style="font-size:15px">' + ico.get(v,"") + '</span> '
-            '<b>' + v + '</b> — ' + l + '</div>'
-            for v, l in _TRYBY)
+        # Legenda trybów
+        legenda = "".join(
+            "<div style='padding:4px 0;font-size:13px'>"
+            "<span style='font-size:15px'>" + t[3] + "</span> "
+            "<b>" + t[1] + "</b> — <span style='color:#5f5e5a'>" + t[2] + "</span></div>"
+            for t in _TRYBY)
 
         html = (
-            '<h1>Tryby sterowania per kanał</h1>'
-            '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
-            '<a href="/harmonogramy" class="btn bp bsm">⏰ Harmonogramy</a>'
-            '<a href="/gpio" class="btn bo bsm">Panel przekaźników</a>'
-            '</div>'
-            '<div class="card" style="background:#EEEDFE;border-color:#AFA9EC">'
-            '<b>Dostępne tryby</b>'
-            '<div class="g3" style="margin-top:8px">' + info + '</div>'
-            '</div>'
-            '<div class="card" style="overflow-x:auto">'
-            '<table><thead><tr>'
-            '<th>Urządzenie</th><th>Kanał</th><th>Opis</th><th>Tryb</th><th></th>'
-            '</tr></thead><tbody>'
-            + (rows_html or '<tr><td colspan=5 style="color:#888;text-align:center;padding:20px">'
-               'Brak urządzeń. <a href="/urzadzenia/dodaj">Dodaj urządzenie</a></td></tr>')
-            + '</tbody></table></div>'
+            "<h1>Sterowanie</h1>"
+            "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
+            "<a href='/harmonogramy' class='btn bp bsm'>⏰ Harmonogramy</a>"
+            "<a href='/gpio' class='btn bo bsm'>Panel przekaźników</a>"
+            "<a href='/urzadzenia/dodaj' class='btn bo bsm'>+ Dodaj urządzenie</a>"
+            "</div>"
+            + ("<div class='card' style='overflow-x:auto'>"
+               "<table><thead><tr>"
+               "<th></th><th>Kanał</th><th>Tryb sterowania</th><th>Stan</th><th></th>"
+               "</tr></thead>"
+               "<tbody>" + rows + "</tbody></table>"
+               "<script>function tR(d,c,s){fetch('/sterowanie/cmd',{method:'POST',"
+               "headers:{'Content-Type':'application/json'},"
+               "body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})})"
+               ".then(r=>r.json()).then(()=>location.reload());}</script>"
+               "</div>"
+               if kanaly else
+               "<div class='card' style='text-align:center;padding:30px'>"
+               "<p style='color:#888'>Brak urządzeń slave.</p>"
+               "<a href='/urzadzenia/dodaj' class='btn bp bsm' style='margin-top:10px'>+ Dodaj ESP32 lub RPi slave</a>"
+               "</div>")
+            + "<details style='margin-top:12px'><summary style='cursor:pointer;color:#534AB7;font-size:13px'>Opis trybów sterowania</summary>"
+            + "<div class='card' style='margin-top:8px'>" + legenda + "</div></details>"
         )
         return R(html, "gpio")
 
@@ -778,89 +795,143 @@ def register_routes(app):
         g = gid(); db = get_db()
         if request.method == "POST":
             tryb = request.form.get("tryb","reczny")
-            sup  = request.form.get("supla_channel_id") or None
-            esh  = request.form.get("esphome_entity","").strip()
-            gpio = request.form.get("gpio_pin") or None
             opis = request.form.get("opis","").strip()
             kat  = request.form.get("kategoria","inne")
+            # Pola zależne od trybu
+            gpio_pin    = request.form.get("gpio_pin") or None
+            siec_ip     = request.form.get("siec_ip","").strip()
+            siec_kanal  = request.form.get("siec_kanal","").strip()
+            supla_ch_id = request.form.get("supla_channel_id") or None
+            esphome_ent = request.form.get("esphome_entity","").strip()
+
             ex = db.execute("SELECT id FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
             if ex:
-                db.execute("UPDATE kanal_sterowanie SET tryb=?,supla_channel_id=?,esphome_entity=?,gpio_pin=?,opis=?,kategoria=? WHERE id=?",
-                           (tryb, sup, esh, gpio, opis, kat, ex["id"]))
+                db.execute("UPDATE kanal_sterowanie SET tryb=?,opis=?,kategoria=?,gpio_pin=?,supla_channel_id=?,esphome_entity=? WHERE id=?",
+                           (tryb, opis, kat, gpio_pin, supla_ch_id, esphome_ent, ex["id"]))
             else:
-                db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,supla_channel_id,esphome_entity,gpio_pin,opis,kategoria) VALUES(?,?,?,?,?,?,?,?,?)",
-                           (g, did, kanal, tryb, sup, esh, gpio, opis, kat))
-            # Zaktualizuj też opis w urzadzenia_kanaly
+                db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,opis,kategoria,gpio_pin,supla_channel_id,esphome_entity) VALUES(?,?,?,?,?,?,?,?,?)",
+                           (g, did, kanal, tryb, opis, kat, gpio_pin, supla_ch_id, esphome_ent))
             db.execute("UPDATE urzadzenia_kanaly SET opis=? WHERE urzadzenie_id=? AND kanal=?", (opis, did, kanal))
             db.commit(); db.close()
-            flash(f"Tryb {opis or kanal}: {tryb}")
+            flash("Zapisano konfigurację kanału.")
             return redirect("/sterowanie")
 
-        dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
-        ks  = db.execute("SELECT * FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
-        supla_ch = db.execute("SELECT id,nazwa,channel_id FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1", (g,)).fetchall()
+        dev  = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
+        ks   = db.execute("SELECT * FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
+        supla_chs = db.execute("SELECT id,nazwa,channel_id FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1", (g,)).fetchall()
         harm_list = db.execute("SELECT * FROM harmonogramy WHERE urzadzenie_id=? AND kanal=? AND gospodarstwo_id=?", (did, kanal, g)).fetchall()
         db.close()
         if not dev: return redirect("/sterowanie")
 
         v = dict(ks) if ks else {}
         tryb_cur = v.get("tryb","reczny")
-        tryb_opt = "".join(
-            f'<option value="{tv}" {"selected" if tryb_cur==tv else ""}>{tl}</option>'
-            for tv, tl in _TRYBY)
-        sup_opt = '<option value="">— brak —</option>' + "".join(
-            f'<option value="{s["channel_id"]}" {"selected" if str(v.get("supla_channel_id",""))==str(s["channel_id"]) else ""}>'
-            f'{s["nazwa"]} (ch:{s["channel_id"]})</option>'
-            for s in supla_ch)
-        _HAR_KAT2 = [("swiatlo","💡 Światło"),("brama","🚪 Brama"),("grzanie","🔥 Grzanie"),
-                     ("wentylacja","💨 Wentylacja"),("pojenie","💧 Pojenie"),("inne","⚡ Inne")]
+
+        _HAR_KAT = [("swiatlo","💡 Światło"),("brama","🚪 Brama"),("grzanie","🔥 Grzanie"),
+                    ("wentylacja","💨 Wentylacja"),("pojenie","💧 Pojenie"),("inne","⚡ Inne")]
+
         kat_opt = "".join(
-            f'<option value="{kv}" {"selected" if v.get("kategoria","inne")==kv else ""}>{kl}</option>'
-            for kv, kl in _HAR_KAT2)
+            "<option value='" + kv + "' " + ("selected" if v.get("kategoria","inne")==kv else "") + ">" + kl + "</option>"
+            for kv, kl in _HAR_KAT)
+        sup_opt = "<option value=''>— brak —</option>" + "".join(
+            "<option value='" + str(s["channel_id"]) + "' " + ("selected" if str(v.get("supla_channel_id",""))==str(s["channel_id"]) else "") + ">"
+            + s["nazwa"] + " (ch:" + str(s["channel_id"]) + ")</option>"
+            for s in supla_chs)
+
+        # Buduj sekcje dla każdego trybu
+        sekcje_html = ""
+        for t in _TRYBY:
+            tv, tl, tdesc, tico = t
+            checked = "checked" if tryb_cur == tv else ""
+            # Pola specyficzne dla trybu
+            extra = ""
+            if tv == "rpi_gpio":
+                extra = (
+                    "<div class='al alok' style='font-size:12px'>App musi działać bezpośrednio na RPi z GPIO.</div>"
+                    "<label>Nr pinu GPIO BCM</label>"
+                    "<input name='gpio_pin' type='number' value='" + str(v.get("gpio_pin","") or "") + "' placeholder='np. 17'>"
+                )
+            elif tv == "rpi_siec":
+                extra = (
+                    "<div class='al alok' style='font-size:12px'>ESP32 lub RPi slave w tej samej sieci WiFi — HTTP REST.</div>"
+                    "<p style='font-size:12px;color:#5f5e5a'>Urządzenie i kanał już wybrane dla tego kanału. Konfiguracja IP/portu jest w <a href='/urzadzenia/" + str(did) + "' style='color:#534AB7'>panelu urządzenia</a>.</p>"
+                )
+            elif tv == "esphome":
+                extra = (
+                    "<div class='al alok' style='font-size:12px'>Urządzenie ESPHome w sieci lokalnej.</div>"
+                    "<label>Nazwa encji ESPHome (np. relay1)</label>"
+                    "<input name='esphome_entity' value='" + (v.get("esphome_entity","") or "") + "' placeholder='relay1'>"
+                )
+            elif tv == "supla" or tv == "supla+rpi":
+                extra = (
+                    "<div class='al alw' style='font-size:12px'>Wymaga internetu i połączenia Supla OAuth.</div>"
+                    "<label>Kanał Supla</label>"
+                    "<select name='supla_channel_id'>" + sup_opt + "</select>"
+                )
+                if tv == "supla+rpi":
+                    extra += (
+                        "<label>Nr pinu GPIO BCM (backup offline)</label>"
+                        "<input name='gpio_pin' type='number' value='" + str(v.get("gpio_pin","") or "") + "'>"
+                    )
+
+            sekcje_html += (
+                "<label style='display:flex;align-items:flex-start;gap:10px;padding:10px;"
+                "border:2px solid " + ("#534AB7" if tryb_cur==tv else "#e0ddd4") + ";"
+                "border-radius:10px;cursor:pointer;margin-bottom:8px;"
+                "background:" + ("#EEEDFE" if tryb_cur==tv else "#fff") + "'>"
+                "<input type='radio' name='tryb' value='" + tv + "' " + checked + " "
+                "onchange='showExtra()' style='margin-top:3px;flex-shrink:0'>"
+                "<div style='flex:1'>"
+                "<div style='font-size:16px'>" + tico + " <b>" + tl + "</b></div>"
+                "<div style='font-size:12px;color:#5f5e5a;margin-top:2px'>" + tdesc + "</div>"
+                + ("<div class='tryb-extra' data-tryb='" + tv + "' style='margin-top:10px'>" + extra + "</div>" if extra else "")
+                + "</div></label>"
+            )
 
         harm_html = ""
         if harm_list:
-            harm_html = ('<div class="al alok" style="font-size:12px;margin-top:8px">'
-                         '⏰ Harmonogramy na tym kanale: '
-                         + ", ".join(h["nazwa"] + " " + (h["czas_wl"] or "") for h in harm_list)
-                         + f' &nbsp; <a href="/harmonogramy" style="color:#534AB7">Zarządzaj →</a>'
-                         + '</div>')
+            harm_html = (
+                "<div class='al alok' style='margin-top:8px'>"
+                "⏰ Aktywne harmonogramy: "
+                + ", ".join("<b>" + h["nazwa"] + "</b> " + (h["czas_wl"] or "") for h in harm_list)
+                + " <a href='/harmonogramy' style='color:#534AB7;margin-left:8px'>Zarządzaj →</a></div>"
+            )
         else:
-            harm_html = ('<div style="font-size:12px;color:#888;margin-top:8px">'
-                         'Brak harmonogramów na tym kanale. '
-                         f'<a href="/harmonogramy/dodaj" style="color:#534AB7">Dodaj →</a></div>')
+            harm_html = (
+                "<div style='font-size:12px;color:#888;margin-top:8px'>"
+                "Brak harmonogramów na tym kanale. "
+                "<a href='/harmonogramy/dodaj' style='color:#534AB7'>Dodaj harmonogram →</a></div>"
+            )
 
         html = (
-            f'<h1>Konfiguracja: {dev["nazwa"]} / {kanal}</h1>'
-            '<div class="card"><form method="POST">'
-            f'<label>Opis kanału (widoczny na dashboardzie)</label>'
-            f'<input name="opis" value="{v.get("opis","")}" placeholder="np. Światło kurnik, Brama wejściowa">'
-            f'<div class="g2"><div><label>Kategoria (ikona na dashboardzie)</label>'
-            f'<select name="kategoria">{kat_opt}</select></div>'
-            f'<div><label>Tryb sterowania</label>'
-            f'<select name="tryb" id="tryb-sel" onchange="showF(this.value)">{tryb_opt}</select></div></div>'
-            f'<div id="fd-s" style="margin-top:10px;display:none">'
-            f'<div class="al alw"><b>Supla</b> — skonfiguruj OAuth w <a href="/supla">panelu Supla</a></div>'
-            f'<label>Kanał Supla</label><select name="supla_channel_id">{sup_opt}</select></div>'
-            f'<div id="fd-e" style="margin-top:10px;display:none">'
-            f'<div class="al alok"><b>ESPHome REST</b> — urządzenie musi mieć typ ESPHome</div>'
-            f'<label>Nazwa encji ESPHome (np. relay1)</label>'
-            f'<input name="esphome_entity" value="{v.get("esphome_entity","")}" placeholder="relay1"></div>'
-            f'<div id="fd-g" style="margin-top:10px;display:none">'
-            f'<div class="al alok"><b>GPIO RPi</b> — gdy app działa bezpośrednio na RPi</div>'
-            f'<label>Numer pinu GPIO BCM</label>'
-            f'<input name="gpio_pin" type="number" value="{v.get("gpio_pin","") or ""}"></div>'
+            "<h1>" + (v.get("opis") or kanal) + "</h1>"
+            "<p style='color:#888;font-size:13px;margin-bottom:12px'>" + dev["nazwa"] + " / " + kanal + "</p>"
+            "<div class='card'><form method='POST'>"
+            "<div class='g2'>"
+            "<div><label>Opis widoczny na dashboardzie</label>"
+            "<input name='opis' value='" + (v.get("opis","") or "") + "' placeholder='np. Światło kurnik, Brama' required></div>"
+            "<div><label>Kategoria (ikona)</label><select name='kategoria'>" + kat_opt + "</select></div>"
+            "</div>"
+            "<h2 style='margin-top:16px;margin-bottom:8px'>Tryb sterowania</h2>"
+            + sekcje_html
             + harm_html
-            + '<br><button class="btn bp">Zapisz</button>'
-            '<a href="/sterowanie" class="btn bo" style="margin-left:8px">Anuluj</a>'
-            '</form></div>'
-            '<script>'
-            'var _sh={"reczny":[],"supla":["s"],"gpio_rpi":["g"],"esphome":["e"],"gpio+supla":["g","s"],"esphome+supla":["e","s"]};'
-            'function showF(v){'
-            '  ["s","g","e"].forEach(function(id){document.getElementById("fd-"+id).style.display="none";});'
-            '  (_sh[v]||[]).forEach(function(id){document.getElementById("fd-"+id).style.display="block";}); }'
-            f'showF("{tryb_cur}");'
-            '</script>'
+            + "<br><button class='btn bp' style='width:100%;padding:12px'>Zapisz</button>"
+            "<a href='/sterowanie' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+            "</form></div>"
+            "<script>"
+            "function showExtra(){"
+            "  var sel=document.querySelector('[name=tryb]:checked');"
+            "  if(!sel)return;"
+            "  document.querySelectorAll('.tryb-extra').forEach(function(el){"
+            "    el.style.display=el.dataset.tryb===sel.value?'block':'none';"
+            "  });"
+            "  document.querySelectorAll('label:has([name=tryb])').forEach(function(lbl){"
+            "    var rb=lbl.querySelector('[name=tryb]');"
+            "    lbl.style.borderColor=rb.checked?'#534AB7':'#e0ddd4';"
+            "    lbl.style.background=rb.checked?'#EEEDFE':'#fff';"
+            "  });"
+            "}"
+            "showExtra();"
+            "</script>"
         )
         return R(html, "gpio")
 
