@@ -275,7 +275,7 @@ def register_routes(app):
         urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
         sprzed = db.execute("""SELECT p.data,p.jaja_sprzedane,p.cena_sprzedazy,
             ROUND(p.jaja_sprzedane*p.cena_sprzedazy,2) as wartosc,
-            k.nazwa as kn, p.typ_sprzedazy
+            k.nazwa as kn, COALESCE(p.typ_sprzedazy,'gotowka') as typ_sprzedazy
             FROM produkcja p LEFT JOIN klienci k ON p.klient_id=k.id
             WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane>0
             ORDER BY p.data DESC LIMIT 5""", (g,)).fetchall()
@@ -1220,23 +1220,67 @@ def register_routes(app):
     @app.route("/pasza/skladniki-baza")
     @farm_required
     def pasza_skladniki_baza():
-        db=get_db(); rows=db.execute("SELECT * FROM skladniki_baza WHERE aktywny=1 ORDER BY kategoria,nazwa").fetchall(); db.close()
-        kat_map={"zboze":"Zboża","bialkowe":"Białkowe","mineralne":"Mineralne","premiks":"Premiksy","naturalny_dodatek":"Naturalne dodatki"}
+        db=get_db(); rows=db.execute("SELECT * FROM skladniki_baza ORDER BY kategoria,nazwa").fetchall(); db.close()
+        kat_map={"zboze":"Zboża","bialkowe":"Białkowe","mineralne":"Mineralne","premiks":"Premiksy","naturalny_dodatek":"Naturalne dodatki","inne":"Inne"}
         bkat=None; w=""
         for s in rows:
             if s["kategoria"]!=bkat:
                 bkat=s["kategoria"]
-                w+=f'<tr><td colspan=7 style="background:#f5f5f0;font-weight:500;font-size:12px;color:#534AB7;padding:8px">{kat_map.get(bkat,bkat)}</td></tr>'
-            w+=(f'<tr><td style="font-weight:500">{s["nazwa"]}</td>'
-                f'<td>{round(s["cena_pln_t"],0)} PLN/T</td>'
-                f'<td>{round(s["bialko_pct"],1)}%</td><td>{round(s["energia_me"],0)}</td>'
-                f'<td>{round(s["wapn_g_kg"],1)}</td><td>{round(s["fosfor_g_kg"],1)}</td>'
-                f'<td style="font-size:11px;color:#888">{(s["uwagi"] or "")[:40]}</td></tr>')
+                w+=('<tr><td colspan=8 style="background:#f5f5f0;font-weight:500;font-size:12px;color:#534AB7;padding:8px">'+kat_map.get(bkat,bkat or "Inne")+'</td></tr>')
+            w+=('<tr>'
+                '<td style="font-weight:500">'+s["nazwa"]+'</td>'
+                '<td>'+str(round(s["cena_pln_t"],0))+' PLN/T</td>'
+                '<td>'+str(round(s["bialko_pct"],1))+'%</td>'
+                '<td>'+str(round(s["energia_me"],0))+'</td>'
+                '<td>'+str(round(s["wapn_g_kg"],1))+'</td>'
+                '<td>'+str(round(s["fosfor_g_kg"],1))+'</td>'
+                '<td style="font-size:11px;color:#888">'+((s["uwagi"] or "")[:35])+'</td>'
+                '<td class="nowrap">'
+                '<a href="/pasza/skladnik-baza/'+str(s["id"])+'/edytuj" class="btn bo bsm">Edytuj</a></td></tr>')
         html=('<h1>Baza składników paszy</h1>'
+            '<a href="/pasza/skladnik-baza/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj składnik</a>'
             '<div class="card" style="overflow-x:auto"><table><thead><tr>'
             '<th>Składnik</th><th>Cena PLN/T</th><th>Białko%</th><th>ME kcal/kg</th>'
-            f'<th>Ca g/kg</th><th>P g/kg</th><th>Uwagi</th></tr></thead>'
+            '<th>Ca g/kg</th><th>P g/kg</th><th>Uwagi</th><th></th></tr></thead>'
             f'<tbody>{w}</tbody></table></div>')
+        return R(html,"ana")
+
+    @app.route("/pasza/skladnik-baza/dodaj", methods=["GET","POST"])
+    @app.route("/pasza/skladnik-baza/<int:sid>/edytuj", methods=["GET","POST"])
+    @farm_required
+    def pasza_skladnik_baza_form(sid=None):
+        db=get_db()
+        if request.method=="POST":
+            f=request.form
+            vals=(f["nazwa"],f.get("kategoria","inne"),
+                  float(f.get("cena_pln_t",0) or 0),
+                  float(f.get("bialko_pct",0) or 0),float(f.get("energia_me",0) or 0),
+                  float(f.get("tluszcz_pct",0) or 0),float(f.get("wlokno_pct",0) or 0),
+                  float(f.get("wapn_g_kg",0) or 0),float(f.get("fosfor_g_kg",0) or 0),
+                  float(f.get("lizyna_g_kg",0) or 0),float(f.get("metionina_g_kg",0) or 0),
+                  f.get("uwagi",""))
+            if sid:
+                db.execute("UPDATE skladniki_baza SET nazwa=?,kategoria=?,cena_pln_t=?,bialko_pct=?,energia_me=?,tluszcz_pct=?,wlokno_pct=?,wapn_g_kg=?,fosfor_g_kg=?,lizyna_g_kg=?,metionina_g_kg=?,uwagi=? WHERE id=?",(*vals,sid))
+            else:
+                db.execute("INSERT INTO skladniki_baza(nazwa,kategoria,cena_pln_t,bialko_pct,energia_me,tluszcz_pct,wlokno_pct,wapn_g_kg,fosfor_g_kg,lizyna_g_kg,metionina_g_kg,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",vals)
+            db.commit(); db.close(); flash("Składnik zapisany."); return redirect("/pasza/skladniki-baza")
+        s=dict(db.execute("SELECT * FROM skladniki_baza WHERE id=?",(sid,)).fetchone()) if sid else {}
+        db.close()
+        kat_opt="".join('<option value="'+k+'" '+("selected" if s.get("kategoria")==k else "")+'>'+l+'</option>'
+            for k,l in [("zboze","Zboże"),("bialkowe","Białkowe"),("mineralne","Mineralne"),("premiks","Premiks"),("naturalny_dodatek","Naturalny dodatek"),("inne","Inne")])
+        def fi(label,name,step="0.01"):
+            return '<div><label>'+label+'</label><input name="'+name+'" type="number" step="'+step+'" value="'+str(s.get(name,"") or "")+'"></div>'
+        html=('<h1>'+("Edytuj składnik" if sid else "Nowy składnik")+'</h1><div class="card"><form method="POST">'
+            '<label>Nazwa</label><input name="nazwa" required value="'+s.get("nazwa","")+'">'
+            '<div class="g2"><div><label>Kategoria</label><select name="kategoria">'+kat_opt+'</select></div>'
+            +fi("Cena PLN/T","cena_pln_t","1")+'</div>'
+            '<h2>Wartości odżywcze (na 1 kg)</h2>'
+            '<div class="g3">'+fi("Białko (%)","bialko_pct")+fi("Energia ME (kcal/kg)","energia_me","1")+fi("Tłuszcz (%)","tluszcz_pct")+'</div>'
+            '<div class="g3">'+fi("Włókno (%)","wlokno_pct")+fi("Wapń Ca (g/kg)","wapn_g_kg")+fi("Fosfor P (g/kg)","fosfor_g_kg")+'</div>'
+            '<div class="g2">'+fi("Lizyna (g/kg)","lizyna_g_kg")+fi("Metionina (g/kg)","metionina_g_kg")+'</div>'
+            '<label>Uwagi</label><textarea name="uwagi" rows="2">'+s.get("uwagi","")+'</textarea>'
+            '<br><button class="btn bp">Zapisz</button><a href="/pasza/skladniki-baza" class="btn bo" style="margin-left:8px">Anuluj</a>'
+            '</form></div>')
         return R(html,"ana")
 
 
@@ -1751,6 +1795,310 @@ def register_routes(app):
 
         html = '<h1>Ustawienia farmy</h1>' + s_podst + s_media + s_supla + s_gpio + s_skroty
         return R(html, "ust")
+
+
+
+    # ─── API: lista składników do autocomplete w wydatkach ───────────────────
+    @app.route("/api/zboze-lista")
+    @farm_required
+    def api_zboze_lista():
+        g = gid()
+        db = get_db()
+        z_bazy = db.execute(
+            "SELECT nazwa, kategoria, cena_pln_t/1000.0 as cena "
+            "FROM skladniki_baza WHERE aktywny=1 ORDER BY nazwa"
+        ).fetchall()
+        z_mag = db.execute(
+            "SELECT nazwa, kategoria, cena_aktualna as cena "
+            "FROM stan_magazynu WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)
+        ).fetchall()
+        db.close()
+        seen = {}
+        for r in list(z_bazy) + list(z_mag):
+            if r["nazwa"] not in seen:
+                seen[r["nazwa"]] = {
+                    "nazwa": r["nazwa"],
+                    "kategoria": r["kategoria"] or "",
+                    "cena": round(float(r["cena"] or 0), 3)
+                }
+        return jsonify(sorted(seen.values(), key=lambda x: x["nazwa"]))
+
+    # ─── EDYCJA składnika bazy ────────────────────────────────────────────────
+    @app.route("/pasza/skladnik-baza/<int:sid>/edytuj", methods=["GET","POST"])
+    @farm_required
+    def pasza_skladnik_baza_edytuj(sid):
+        db = get_db()
+        if request.method == "POST":
+            f = request.form
+            db.execute("""UPDATE skladniki_baza SET
+                nazwa=?, kategoria=?, cena_pln_t=?,
+                bialko_pct=?, energia_me=?, tluszcz_pct=?, wlokno_pct=?,
+                wapn_g_kg=?, fosfor_g_kg=?, lizyna_g_kg=?, metionina_g_kg=?, uwagi=?
+                WHERE id=?""", (
+                f["nazwa"], f.get("kategoria","inne"),
+                float(f.get("cena_pln_t",0) or 0),
+                float(f.get("bialko_pct",0) or 0),
+                float(f.get("energia_me",0) or 0),
+                float(f.get("tluszcz_pct",0) or 0),
+                float(f.get("wlokno_pct",0) or 0),
+                float(f.get("wapn_g_kg",0) or 0),
+                float(f.get("fosfor_g_kg",0) or 0),
+                float(f.get("lizyna_g_kg",0) or 0),
+                float(f.get("metionina_g_kg",0) or 0),
+                f.get("uwagi",""), sid
+            ))
+            db.commit(); db.close()
+            flash("Składnik zaktualizowany.")
+            return redirect("/pasza/skladniki-baza")
+        s = dict(db.execute("SELECT * FROM skladniki_baza WHERE id=?", (sid,)).fetchone() or {})
+        db.close()
+        if not s: return redirect("/pasza/skladniki-baza")
+        KAT = [("zboze","Zboże"),("bialkowe","Białkowe"),("mineralne","Mineralne"),
+               ("premiks","Premiks"),("naturalny_dodatek","Naturalny dodatek"),("inne","Inne")]
+        kat_opt = "".join(
+            f'<option value="{k}" {"selected" if s.get("kategoria")==k else ""}>{l}</option>'
+            for k,l in KAT
+        )
+        def fi(label, name, step="0.01"):
+            return (f'<div><label>{label}</label>'
+                    f'<input name="{name}" type="number" step="{step}" value="{s.get(name,"") or ""}"></div>')
+        html = (
+            f'<h1>Edytuj składnik: {s.get("nazwa","")}</h1>'
+            '<div class="card"><form method="POST">'
+            f'<label>Nazwa</label><input name="nazwa" required value="{s.get("nazwa","")}">'
+            f'<div class="g2"><div><label>Kategoria</label><select name="kategoria">{kat_opt}</select></div>'
+            + fi("Cena PLN/T","cena_pln_t","1") +
+            '</div><h2>Wartości odżywcze (na 1 kg składnika)</h2>'
+            '<div class="g3">'
+            + fi("Białko (%)","bialko_pct")
+            + fi("Energia ME (kcal/kg)","energia_me","1")
+            + fi("Tłuszcz (%)","tluszcz_pct")
+            + fi("Włókno (%)","wlokno_pct")
+            + fi("Wapń Ca (g/kg)","wapn_g_kg")
+            + fi("Fosfor P (g/kg)","fosfor_g_kg")
+            + fi("Lizyna (g/kg)","lizyna_g_kg")
+            + fi("Metionina (g/kg)","metionina_g_kg")
+            + '</div>'
+            f'<label>Uwagi</label><textarea name="uwagi" rows="2">{s.get("uwagi","")}</textarea>'
+            '<br><button class="btn bp">Zapisz</button>'
+            '<a href="/pasza/skladniki-baza" class="btn bo" style="margin-left:8px">Anuluj</a>'
+            '</form></div>'
+        )
+        return R(html, "ana")
+
+    @app.route("/pasza/skladnik-baza/dodaj", methods=["GET","POST"])
+    @farm_required
+    def pasza_skladnik_baza_dodaj():
+        db = get_db()
+        if request.method == "POST":
+            f = request.form
+            db.execute("""INSERT INTO skladniki_baza
+                (nazwa,kategoria,cena_pln_t,bialko_pct,energia_me,tluszcz_pct,wlokno_pct,
+                 wapn_g_kg,fosfor_g_kg,lizyna_g_kg,metionina_g_kg,uwagi)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                f["nazwa"], f.get("kategoria","inne"),
+                float(f.get("cena_pln_t",0) or 0),
+                float(f.get("bialko_pct",0) or 0), float(f.get("energia_me",0) or 0),
+                float(f.get("tluszcz_pct",0) or 0), float(f.get("wlokno_pct",0) or 0),
+                float(f.get("wapn_g_kg",0) or 0), float(f.get("fosfor_g_kg",0) or 0),
+                float(f.get("lizyna_g_kg",0) or 0), float(f.get("metionina_g_kg",0) or 0),
+                f.get("uwagi","")
+            ))
+            db.commit(); db.close()
+            flash("Składnik dodany.")
+            return redirect("/pasza/skladniki-baza")
+        db.close()
+        KAT = [("zboze","Zboże"),("bialkowe","Białkowe"),("mineralne","Mineralne"),
+               ("premiks","Premiks"),("naturalny_dodatek","Naturalny dodatek"),("inne","Inne")]
+        kat_opt = "".join(f'<option value="{k}">{l}</option>' for k,l in KAT)
+        def fi(label, name, step="0.01"):
+            return f'<div><label>{label}</label><input name="{name}" type="number" step="{step}" value="0"></div>'
+        html = (
+            '<h1>Nowy składnik bazy</h1>'
+            '<div class="card"><form method="POST">'
+            f'<label>Nazwa</label><input name="nazwa" required placeholder="np. Kukurydza (śrutowana)">'
+            f'<div class="g2"><div><label>Kategoria</label><select name="kategoria">{kat_opt}</select></div>'
+            + fi("Cena PLN/T","cena_pln_t","1") +
+            '</div><h2>Wartości odżywcze (na 1 kg składnika)</h2>'
+            '<div class="g3">'
+            + fi("Białko (%)","bialko_pct")
+            + fi("Energia ME (kcal/kg)","energia_me","1")
+            + fi("Tłuszcz (%)","tluszcz_pct")
+            + fi("Włókno (%)","wlokno_pct")
+            + fi("Wapń Ca (g/kg)","wapn_g_kg")
+            + fi("Fosfor P (g/kg)","fosfor_g_kg")
+            + fi("Lizyna (g/kg)","lizyna_g_kg")
+            + fi("Metionina (g/kg)","metionina_g_kg")
+            + '</div>'
+            '<label>Uwagi</label><textarea name="uwagi" rows="2"></textarea>'
+            '<br><button class="btn bp">Dodaj</button>'
+            '<a href="/pasza/skladniki-baza" class="btn bo" style="margin-left:8px">Anuluj</a>'
+            '</form></div>'
+        )
+        return R(html, "ana")
+
+    # ─── SPRZEDAŻ NIEZALEŻNA ──────────────────────────────────────────────────
+    @app.route("/sprzedaz", methods=["GET","POST"])
+    @farm_required
+    def sprzedaz():
+        g = gid()
+        if request.method == "POST":
+            db = get_db()
+            d       = request.form.get("data", date.today().isoformat())
+            ilosc   = int(request.form.get("ilosc", 0) or 0)
+            cena    = float(request.form.get("cena_szt", 0) or 0)
+            kid     = request.form.get("klient_id") or None
+            zid     = request.form.get("zamowienie_id") or None
+            typ     = request.form.get("typ_platnosci", "gotowka")
+            uwagi   = request.form.get("uwagi", "")
+            wartosc = round(ilosc * cena, 2)
+
+            # Zaktualizuj produkcję na ten dzień
+            ex = db.execute(
+                "SELECT id, jaja_sprzedane, cena_sprzedazy FROM produkcja "
+                "WHERE gospodarstwo_id=? AND data=?", (g, d)
+            ).fetchone()
+            if ex:
+                nowa_ilosc = (ex["jaja_sprzedane"] or 0) + ilosc
+                # Przelicz cenę ważoną
+                stara_wart = (ex["jaja_sprzedane"] or 0) * (ex["cena_sprzedazy"] or 0)
+                nowa_cena = round((stara_wart + wartosc) / nowa_ilosc, 4) if nowa_ilosc > 0 else cena
+                db.execute(
+                    "UPDATE produkcja SET jaja_sprzedane=?, cena_sprzedazy=?, "
+                    "klient_id=COALESCE(klient_id,?), zamowienie_id=COALESCE(zamowienie_id,?) "
+                    "WHERE id=?",
+                    (nowa_ilosc, nowa_cena, kid, zid, ex["id"])
+                )
+            else:
+                db.execute(
+                    "INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,"
+                    "cena_sprzedazy,pasza_wydana_kg,klient_id,zamowienie_id,typ_sprzedazy,uwagi) "
+                    "VALUES(?,?,0,?,?,0,?,?,?,?)",
+                    (g, d, ilosc, cena, kid, zid, typ, uwagi)
+                )
+
+            # Oznacz zamówienie jako dostarczone
+            if zid and ilosc > 0:
+                db.execute(
+                    "UPDATE zamowienia SET status='dostarczone' WHERE id=? AND gospodarstwo_id=?",
+                    (zid, g)
+                )
+
+            db.commit(); db.close()
+            flash(f"Sprzedaż zapisana: {ilosc} szt. × {cena} zł = {wartosc} zł")
+            return redirect("/sprzedaz")
+
+        # GET — formularz + historia
+        db = get_db()
+        klienci = db.execute(
+            "SELECT id, nazwa, telefon FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)
+        ).fetchall()
+        zamow = db.execute(
+            """SELECT z.id, z.data_dostawy, z.ilosc, k.nazwa as kn
+               FROM zamowienia z LEFT JOIN klienci k ON z.klient_id=k.id
+               WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone')
+               ORDER BY z.data_dostawy""", (g,)
+        ).fetchall()
+        historia = db.execute(
+            """SELECT p.data, p.jaja_sprzedane, p.cena_sprzedazy,
+               ROUND(p.jaja_sprzedane*p.cena_sprzedazy,2) as wartosc,
+               k.nazwa as kn, COALESCE(p.typ_sprzedazy,"gotowka") as typ_sprzedazy, p.uwagi
+               FROM produkcja p LEFT JOIN klienci k ON p.klient_id=k.id
+               WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane>0
+               ORDER BY p.data DESC LIMIT 30""", (g,)
+        ).fetchall()
+        mag = db.execute(
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s "
+            "FROM produkcja WHERE gospodarstwo_id=?", (g,)
+        ).fetchone()
+        stan_mag = max(0, mag["p"] - mag["s"])
+        db.close()
+
+        kl_opt = '<option value="">— anonimowa —</option>' + "".join(
+            f'<option value="{k["id"]}">{k["nazwa"]}"'
+            + (f' ({k["telefon"]})' if k["telefon"] else "")
+            + '</option>'
+            for k in klienci
+        )
+        zam_opt = '<option value="">— bez zamówienia —</option>' + "".join(
+            f'<option value="{z["id"]}">{z["data_dostawy"]} · {z["kn"] or "?"} · {z["ilosc"]} szt.</option>'
+            for z in zamow
+        )
+        typ_opt = "".join(
+            f'<option value="{v}">{l}</option>'
+            for v, l in [
+                ("gotowka","Gotówka"),("przelew","Przelew"),
+                ("z_salda","Z salda klienta"),("nastepnym_razem","Zapłata następnym razem")
+            ]
+        )
+
+        w_hist = "".join(
+            '<tr>'
+            '<td>' + r["data"] + '</td>'
+            '<td style="font-weight:500">' + str(r["jaja_sprzedane"]) + ' szt.</td>'
+            '<td>' + str(r["cena_sprzedazy"]) + ' zł</td>'
+            '<td style="color:#3B6D11;font-weight:500">' + str(r["wartosc"]) + ' zł</td>'
+            '<td>' + (r["kn"] or "—") + '</td>'
+            '<td style="font-size:11px;color:#888">' + (r["typ_sprzedazy"] or "") + '</td>'
+            '<td style="font-size:11px;color:#888">' + (r["uwagi"] or "") + '</td>'
+            '</tr>'
+            for r in historia
+        )
+
+        html = (
+            '<h1>Sprzedaż jaj</h1>'
+            f'<div class="card stat" style="margin-bottom:12px;text-align:center">'
+            f'<div class="v" style="color:{"#3B6D11" if stan_mag>0 else "#888"}">{stan_mag}</div>'
+            f'<div class="l">Jaj dostępnych w magazynie</div></div>'
+
+            '<div class="card"><b>Nowa sprzedaż</b>'
+            '<form method="POST" id="sp-form" style="margin-top:10px">'
+            f'<div class="g2">'
+            f'<div><label>Data sprzedaży</label>'
+            f'<input name="data" type="date" value="{date.today().isoformat()}"></div>'
+            f'<div><label>Klient</label><select name="klient_id" id="kl-sel">{kl_opt}</select>'
+            f'<a href="/klienci/dodaj" style="font-size:12px;color:#534AB7;display:block;margin-top:4px">+ nowy klient</a></div>'
+            f'</div>'
+
+            '<div class="g3">'
+            '<div><label>Ilość (szt.)</label>'
+            '<input name="ilosc" type="number" min="1" id="sp-il" oninput="cW()" required></div>'
+            '<div><label>Cena/szt (zł)</label>'
+            '<input name="cena_szt" type="number" step="0.01" id="sp-cena" oninput="cW()"></div>'
+            '<div><label>Typ płatności</label>'
+            f'<select name="typ_platnosci">{typ_opt}</select></div>'
+            '</div>'
+
+            '<div style="background:#f5f5f0;border-radius:8px;padding:8px 12px;font-size:14px;margin:8px 0">'
+            'Wartość: <b id="sp-wrt">0.00 zł</b></div>'
+
+            '<label>Realizacja zamówienia (opcjonalnie)</label>'
+            f'<select name="zamowienie_id">{zam_opt}</select>'
+
+            '<label>Uwagi</label>'
+            '<input name="uwagi" placeholder="opcjonalnie">'
+
+            '<br><button class="btn bg" style="width:100%;margin-top:12px;padding:14px;font-size:16px">'
+            '💰 Zapisz sprzedaż</button>'
+            '</form></div>'
+
+            '<div class="card" style="overflow-x:auto"><b>Historia sprzedaży</b>'
+            '<table style="margin-top:8px"><thead><tr>'
+            '<th>Data</th><th>Ilość</th><th>Cena</th><th>Wartość</th>'
+            '<th>Klient</th><th>Płatność</th><th>Uwagi</th>'
+            '</tr></thead>'
+            f'<tbody>{w_hist or "<tr><td colspan=7 style=\'color:#888;text-align:center;padding:16px\'>Brak sprzedaży</td></tr>"}</tbody>'
+            '</table></div>'
+
+            '<script>'
+            'function cW(){'
+            '  var i=parseFloat(document.getElementById("sp-il").value)||0;'
+            '  var c=parseFloat(document.getElementById("sp-cena").value)||0;'
+            '  document.getElementById("sp-wrt").textContent=(i*c).toFixed(2)+" zł";'
+            '}'
+            '</script>'
+        )
+        return R(html, "zam")
 
 
     return app
