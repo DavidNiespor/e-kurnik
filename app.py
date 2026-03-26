@@ -482,13 +482,23 @@ def dashboard():
             urz_html += (
                 '<div class="relay-card ' + ('relay-on' if on else '') + '" onclick="togDev(' + str(u["id"]) + ',\'' + ch["kanal"] + '\',' + ('false' if on else 'true') + ')">'
                 '<div class="tog ' + ('on' if on else '') + '" id="tog-' + str(u["id"]) + '-' + ch["kanal"] + '"></div>'
-                '<div style="font-size:11px;margin-top:4px;font-weight:500">' + ch["kanal"] + '</div>'
+                '<div style="font-size:11px;margin-top:4px;font-weight:500">' + (ch["opis"] or ch["kanal"]) + '</div>'
                 '<div style="font-size:10px;color:#888">' + u["nazwa"] + '</div>'
                 '</div>'
             )
 
+    # Data po polsku
+    _dni_pl = ['Poniedziałek','Wtorek','Środa','Czwartek','Piątek','Sobota','Niedziela']
+    _mies_pl = ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','sierpnia','września','października','listopada','grudnia']
+    _dzisiaj = date.today()
+    _data_str = f'{_dni_pl[_dzisiaj.weekday()]}, {_dzisiaj.day} {_mies_pl[_dzisiaj.month-1]} {_dzisiaj.year}'
+
     html = (
-        al_html
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+        '<h1 style="margin-bottom:0">Dashboard</h1>'
+        '<span style="font-size:14px;color:#5f5e5a;font-weight:500">' + _data_str + '</span>'
+        '</div>'
+        + al_html
         + '<div class="g4" style="margin-bottom:10px">'
         '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7 dni</div><div class="s">' + str(kur) + ' niosek</div></div>'
         '<div class="card stat"><div class="v">' + str(mag_stan) + '</div><div class="l">Jaj w magazynie</div><div class="s">zarezerwowane: ' + str(zarez) + '</div></div>'
@@ -510,7 +520,7 @@ def dashboard():
         '</form></div>'
         '<script>'
         'function togDev(uid,ch,state){'
-        'fetch("/urzadzenia/cmd",{method:"POST",'
+        'fetch("/sterowanie/cmd",{method:"POST",'
         'headers:{"Content-Type":"application/json"},'
         'body:JSON.stringify({urzadzenie_id:uid,kanal:ch,stan:state})})'
         '.then(r=>r.json()).then(()=>location.reload());}'
@@ -1237,7 +1247,7 @@ def urzadzenia_panel(did):
         '<a href="/urzadzenia/' + str(did) + '/ping" class="btn bo bsm">Ping / odśwież status</a>'
         '<script>'
         'function sendCmd(uid,ch,state){'
-        'fetch("/urzadzenia/cmd",{method:"POST",'
+        'fetch("/sterowanie/cmd",{method:"POST",'
         'headers:{"Content-Type":"application/json"},'
         'body:JSON.stringify({urzadzenie_id:uid,kanal:ch,stan:state})})'
         '.then(r=>r.json()).then(()=>location.reload());}'

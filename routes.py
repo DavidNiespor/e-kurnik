@@ -934,29 +934,86 @@ def register_routes(app):
         db.execute("DELETE FROM supla_config WHERE id=? AND gospodarstwo_id=?",(sid,g))
         db.commit(); db.close(); flash("Usunięto."); return redirect("/supla")
 
-    @app.route("/webhook/supla", methods=["POST"])
+    @app.route("/webhook/supla", methods=["POST","GET"])
     def webhook_supla():
-        data=request.get_json(force=True,silent=True) or {}
-        channel_id=data.get("channel_id") or data.get("channel",{}).get("id")
-        action=data.get("action","").upper(); state_raw=data.get("state")
-        if state_raw is not None: stan=bool(state_raw) if not isinstance(state_raw,str) else state_raw.lower() in("1","true","on")
-        elif action in("TURN_ON","ON"): stan=True
-        elif action in("TURN_OFF","OFF"): stan=False
-        else: stan=None
-        if channel_id is None: return jsonify({"ok":False,"msg":"no channel_id"}),400
-        db=get_db()
-        tok=db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_webhook_token' ORDER BY gospodarstwo_id DESC LIMIT 1").fetchone()
-        if tok and tok["wartosc"] and request.headers.get("X-Supla-Token","")!=tok["wartosc"]:
-            db.close(); return jsonify({"ok":False,"msg":"invalid token"}),403
-        cfg=db.execute("SELECT * FROM supla_config WHERE channel_id=? AND aktywny=1",(channel_id,)).fetchone()
-        db.execute("INSERT INTO supla_log(czas,channel_id,action_raw,stan,payload,gospodarstwo_id) VALUES(?,?,?,?,?,?)",
-                   (datetime.now().isoformat(),channel_id,action,1 if stan else 0,json.dumps(data),cfg["gospodarstwo_id"] if cfg else None))
+        # Obsłuż oba formaty: JSON i form-encoded
+        ct = request.content_type or ""
+        if "json" in ct:
+            data = request.get_json(force=True, silent=True) or {}
+        else:
+            # form-encoded lub query string (GET dla testów)
+            data = {}
+            for key in ["channel_id","action","state","value","hi"]:
+                v = request.form.get(key) or request.args.get(key)
+                if v is not None:
+                    data[key] = v
+
+        # Parsuj channel_id
+        raw_ch = data.get("channel_id") or data.get("channel",{}).get("id") if isinstance(data.get("channel"),dict) else data.get("channel_id")
+        try: channel_id = int(raw_ch) if raw_ch is not None else None
+        except: channel_id = None
+
+        # Parsuj stan ON/OFF z różnych pól
+        action = str(data.get("action","")).upper()
+        state_raw = data.get("state")
+        hi_raw = data.get("hi")
+        value_raw = data.get("value")
+
+        if action in ("TURN_ON","ON","1","HIGH"):   stan = True
+        elif action in ("TURN_OFF","OFF","0","LOW"): stan = False
+        elif state_raw is not None:
+            if isinstance(state_raw, bool): stan = state_raw
+            else: stan = str(state_raw).lower() in ("1","true","on","high")
+        elif hi_raw is not None:
+            stan = str(hi_raw).lower() in ("1","true","on")
+        elif value_raw is not None:
+            stan = str(value_raw).lower() in ("1","true","on","high")
+        else:
+            stan = None
+
+        if channel_id is None:
+            return jsonify({"ok":False,"msg":"no channel_id","received":data}), 400
+
+        db = get_db()
+
+        # Weryfikacja tokenu
+        tok = db.execute(
+            "SELECT wartosc FROM ustawienia WHERE klucz='supla_webhook_token' ORDER BY gospodarstwo_id DESC LIMIT 1"
+        ).fetchone()
+        req_token = (request.headers.get("X-Supla-Token","") or
+                     request.headers.get("Authorization","").replace("Bearer ","") or
+                     request.args.get("token",""))
+        if tok and tok["wartosc"] and req_token != tok["wartosc"]:
+            db.close()
+            return jsonify({"ok":False,"msg":"invalid token","hint":"Set X-Supla-Token header"}), 403
+
+        # Znajdź konfigurację
+        cfg = db.execute(
+            "SELECT * FROM supla_config WHERE channel_id=? AND aktywny=1", (channel_id,)
+        ).fetchone()
+
+        # Zaloguj
+        db.execute(
+            "INSERT INTO supla_log(czas,channel_id,action_raw,stan,payload,gospodarstwo_id) VALUES(?,?,?,?,?,?)",
+            (datetime.now().isoformat(), channel_id, action,
+             1 if stan else 0, json.dumps(data), cfg["gospodarstwo_id"] if cfg else None)
+        )
         db.commit()
-        wynik={"ok":True,"channel_id":channel_id,"stan":stan}
+
+        wynik = {"ok":True,"channel_id":channel_id,"stan":stan,"action":action}
+
         if cfg and stan is not None and cfg["powiazane_urzadzenie_id"] and cfg["powiazany_kanal"]:
-            ok2,msg2=_send(cfg["powiazane_urzadzenie_id"],cfg["powiazany_kanal"],stan,cfg["gospodarstwo_id"])
-            wynik["slave_ok"]=ok2; wynik["slave_msg"]=msg2
-        db.close(); return jsonify(wynik)
+            ok2, msg2 = _send(cfg["powiazane_urzadzenie_id"], cfg["powiazany_kanal"], stan, cfg["gospodarstwo_id"])
+            wynik["slave_ok"] = ok2; wynik["slave_msg"] = msg2
+            if ok2:
+                db2 = get_db()
+                db2.execute("UPDATE supla_config SET ostatni_stan=? WHERE id=?", (1 if stan else 0, cfg["id"]))
+                db2.commit(); db2.close()
+        elif not cfg:
+            wynik["warning"] = f"Brak konfiguracji dla channel_id={channel_id}"
+
+        db.close()
+        return jsonify(wynik)
 
     # ─── ESPHOME ─────────────────────────────────────────────────────────────
     @app.route("/integracje/esphome")
