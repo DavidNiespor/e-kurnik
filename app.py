@@ -24,7 +24,10 @@ from devices import send_command, ping_device, ESP32_FIRMWARE
 
 # ─── MODUŁY ROZSZERZEŃ ───────────────────────────────────────────────────────
 from routes import register_routes
-from supla_oauth import register_supla_oauth_routes
+try:
+    from supla_oauth import register_supla_oauth_routes
+except ImportError:
+    register_supla_oauth_routes = None
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -143,12 +146,13 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <div class="nb-item">
     <span class="nb-link {{ 'on' if p in ['gpio','urz','kal'] }}">Sterowanie <span class="arr">&#9660;</span></span>
     <div class="nb-drop">
-      <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Tryby sterowania</a>
+      <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Panel sterowania</a>
       <a href="/gpio" class="{{ 'on' if p=='gpio' }}">GPIO / przekaźniki</a>
       <a href="/gpio/pwm">LED PWM</a>
+      <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}">⏰ Harmonogramy</a>
       <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
       <div class="nb-sep"></div>
-      <a href="/pojenie">Pojenie</a>
+      <a href="/harmonogramy">Harmonogramy</a>
       <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
       <div class="nb-sep"></div>
       <a href="/ustawienia/farma">Ustawienia i integracje</a>
@@ -1644,7 +1648,8 @@ def admin_config():
 
 # ─── REJESTRACJA MODUŁÓW (route'y tylko — bez init DB) ──────────────────────
 register_routes(app)
-register_supla_oauth_routes(app)
+if register_supla_oauth_routes:
+    register_supla_oauth_routes(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
@@ -1673,6 +1678,11 @@ def admin_farm_toggle(fid):
 def startup():
     init_db()
     init_auth()
+    try:
+        from scheduler import start as _sched_start
+        _sched_start()
+    except Exception as e:
+        print(f"Scheduler start error: {e}")
 
 
 if __name__ == "__main__":

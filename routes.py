@@ -149,6 +149,24 @@ def register_routes(app):
             kanal TEXT NOT NULL, opis TEXT DEFAULT '', tryb TEXT DEFAULT 'reczny',
             supla_channel_id INTEGER, esphome_entity TEXT DEFAULT '',
             gpio_pin INTEGER, UNIQUE(urzadzenie_id, kanal));
+
+        CREATE TABLE IF NOT EXISTS harmonogramy (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+            nazwa TEXT NOT NULL,
+            ikona TEXT DEFAULT '⚡',
+            kategoria TEXT DEFAULT 'inne',
+            urzadzenie_id INTEGER REFERENCES urzadzenia(id) ON DELETE SET NULL,
+            kanal TEXT,
+            typ TEXT DEFAULT 'czas_staly',
+            czas_wl TEXT,
+            czas_wyl TEXT,
+            offset_minut INTEGER DEFAULT 0,
+            czas_trwania_s INTEGER DEFAULT 0,
+            dni_tygodnia TEXT DEFAULT '[]',
+            aktywny INTEGER DEFAULT 1,
+            ostatnie_wykonanie DATETIME);
+
         CREATE TABLE IF NOT EXISTS harmonogram_pojenia (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id),
@@ -674,77 +692,188 @@ def register_routes(app):
         html+='<script>function tR(d,c,s){fetch("/sterowanie/cmd",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(r=>r.json()).then(()=>location.reload());}</script>'
         return R(html,"gpio")
 
+    # ─── STEROWANIE (tryby per kanał) ─────────────────────────────────────────
+    _TRYBY = [
+        ("reczny",        "Ręczny (tylko panel)"),
+        ("supla",         "Supla webhook"),
+        ("gpio_rpi",      "GPIO RPi bezpośrednie"),
+        ("esphome",       "ESPHome REST"),
+        ("gpio+supla",    "GPIO RPi + Supla"),
+        ("esphome+supla", "ESPHome + Supla"),
+    ]
+
     @app.route("/sterowanie")
     @farm_required
     def sterowanie():
-        g=gid(); db=get_db()
-        kanaly=db.execute("""SELECT uc.*,u.nazwa as urz_nazwa,
-            ks.tryb,ks.supla_channel_id,ks.esphome_entity,ks.gpio_pin,ks.opis as kopis
-            FROM urzadzenia_kanaly uc JOIN urzadzenia u ON uc.urzadzenie_id=u.id
-            LEFT JOIN kanal_sterowanie ks ON ks.urzadzenie_id=uc.urzadzenie_id AND ks.kanal=uc.kanal
-            WHERE u.gospodarstwo_id=? AND u.aktywne=1 ORDER BY u.nazwa,uc.kanal""",(g,)).fetchall()
+        g = gid(); db = get_db()
+        kanaly = db.execute("""
+            SELECT uc.*, uc.urzadzenie_id,
+                   u.nazwa as urz_nazwa, u.typ as urz_typ,
+                   ks.tryb, ks.supla_channel_id, ks.esphome_entity,
+                   ks.gpio_pin, ks.opis as kopis
+            FROM urzadzenia_kanaly uc
+            JOIN urzadzenia u ON uc.urzadzenie_id = u.id
+            LEFT JOIN kanal_sterowanie ks
+                ON ks.urzadzenie_id = uc.urzadzenie_id AND ks.kanal = uc.kanal
+            WHERE u.gospodarstwo_id = ? AND u.aktywne = 1
+            ORDER BY u.nazwa, uc.kanal""", (g,)).fetchall()
+        # Pobierz aktywne harmonogramy per kanał
+        harm = db.execute(
+            "SELECT urzadzenie_id, kanal, COUNT(*) as n FROM harmonogramy "
+            "WHERE gospodarstwo_id=? AND aktywny=1 GROUP BY urzadzenie_id, kanal", (g,)).fetchall()
+        harm_map = {(h["urzadzenie_id"], h["kanal"]): h["n"] for h in harm}
         db.close()
-        kol={"reczny":"b-gray","supla":"b-amber","gpio_rpi":"b-green","esphome":"b-blue","gpio+supla":"b-purple","esphome+supla":"b-purple"}
-        ico={"reczny":"🖱","supla":"⚡","gpio_rpi":"🔌","esphome":"📡","gpio+supla":"🔌⚡","esphome+supla":"📡⚡"}
-        w="".join(f'<tr><td style="font-weight:500">{k["urz_nazwa"]}</td><td><code>{k["kanal"]}</code></td>'
-            f'<td>{k["kopis"] or k["opis"] or "—"}</td>'
-            f'<td><span class="badge {kol.get(k["tryb"] or "reczny","b-gray")}">{ico.get(k["tryb"] or "reczny","")} {k["tryb"] or "reczny"}</span></td>'
-            f'<td><a href="/sterowanie/kanal/{k["urzadzenie_id"]}/{k["kanal"]}" class="btn bo bsm">Konfiguruj</a></td></tr>'
-            for k in kanaly)
-        info="".join(f'<div style="padding:3px 0;font-size:13px"><span style="font-size:15px">{ico.get(v,"")}</span> <b>{v}</b> — {l}</div>' for v,l in _TRYBY)
-        html=('<h1>Tryby sterowania per kanał</h1>'
-            f'<div class="card" style="background:#EEEDFE;border-color:#AFA9EC"><b>Dostępne tryby</b><div class="g3" style="margin-top:8px">{info}</div></div>'
-            '<div class="card" style="overflow-x:auto"><table><thead><tr><th>Urządzenie</th><th>Kanał</th><th>Opis</th><th>Tryb</th><th></th></tr></thead>'
-            f'<tbody>{w or "<tr><td colspan=5 style=\'color:#888;text-align:center;padding:20px\'>Brak urządzeń. <a href=\'/urzadzenia/dodaj\'>Dodaj urządzenie</a></td></tr>"}</tbody></table></div>')
-        return R(html,"gpio")
+
+        kol = {"reczny":"b-gray","supla":"b-amber","gpio_rpi":"b-green",
+               "esphome":"b-blue","gpio+supla":"b-purple","esphome+supla":"b-purple"}
+        ico = {"reczny":"🖱","supla":"⚡","gpio_rpi":"🔌","esphome":"📡","gpio+supla":"🔌⚡","esphome+supla":"📡⚡"}
+
+        rows_html = ""
+        for k in kanaly:
+            tryb = k["tryb"] or "reczny"
+            hn = harm_map.get((k["urzadzenie_id"], k["kanal"]), 0)
+            rows_html += (
+                '<tr>'
+                '<td style="font-weight:500">' + k["urz_nazwa"] + '</td>'
+                '<td><code>' + k["kanal"] + '</code></td>'
+                '<td>' + (k["kopis"] or k["opis"] or "—") + '</td>'
+                '<td><span class="badge ' + kol.get(tryb,"b-gray") + '">'
+                + ico.get(tryb,"") + ' ' + tryb + '</span>'
+                + (' <span style="font-size:10px;color:#534AB7">⏰×' + str(hn) + '</span>' if hn else '')
+                + '</td>'
+                '<td class="nowrap">'
+                '<a href="/sterowanie/kanal/' + str(k["urzadzenie_id"]) + '/' + k["kanal"] + '" class="btn bo bsm">Konfiguruj</a>'
+                '</td></tr>'
+            )
+
+        info = "".join(
+            '<div style="padding:3px 0;font-size:13px">'
+            '<span style="font-size:15px">' + ico.get(v,"") + '</span> '
+            '<b>' + v + '</b> — ' + l + '</div>'
+            for v, l in _TRYBY)
+
+        html = (
+            '<h1>Tryby sterowania per kanał</h1>'
+            '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+            '<a href="/harmonogramy" class="btn bp bsm">⏰ Harmonogramy</a>'
+            '<a href="/gpio" class="btn bo bsm">Panel przekaźników</a>'
+            '</div>'
+            '<div class="card" style="background:#EEEDFE;border-color:#AFA9EC">'
+            '<b>Dostępne tryby</b>'
+            '<div class="g3" style="margin-top:8px">' + info + '</div>'
+            '</div>'
+            '<div class="card" style="overflow-x:auto">'
+            '<table><thead><tr>'
+            '<th>Urządzenie</th><th>Kanał</th><th>Opis</th><th>Tryb</th><th></th>'
+            '</tr></thead><tbody>'
+            + (rows_html or '<tr><td colspan=5 style="color:#888;text-align:center;padding:20px">'
+               'Brak urządzeń. <a href="/urzadzenia/dodaj">Dodaj urządzenie</a></td></tr>')
+            + '</tbody></table></div>'
+        )
+        return R(html, "gpio")
 
     @app.route("/sterowanie/kanal/<int:did>/<kanal>", methods=["GET","POST"])
     @farm_required
     def sterowanie_kanal(did, kanal):
-        g=gid(); db=get_db()
-        if request.method=="POST":
-            tryb=request.form.get("tryb","reczny")
-            sup=request.form.get("supla_channel_id") or None
-            esh=request.form.get("esphome_entity","").strip()
-            gpio=request.form.get("gpio_pin") or None
-            opis=request.form.get("opis","").strip()
-            ex=db.execute("SELECT id FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?",(did,kanal)).fetchone()
-            if ex: db.execute("UPDATE kanal_sterowanie SET tryb=?,supla_channel_id=?,esphome_entity=?,gpio_pin=?,opis=? WHERE id=?",(tryb,sup,esh,gpio,opis,ex["id"]))
-            else:  db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,supla_channel_id,esphome_entity,gpio_pin,opis) VALUES(?,?,?,?,?,?,?,?)",(g,did,kanal,tryb,sup,esh,gpio,opis))
-            db.commit(); db.close(); flash(f"Tryb {kanal}: {tryb}"); return redirect("/sterowanie")
-        dev=db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?",(did,g)).fetchone()
-        ks=db.execute("SELECT * FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?",(did,kanal)).fetchone()
-        supla=db.execute("SELECT id,nazwa,channel_id FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1",(g,)).fetchall()
+        g = gid(); db = get_db()
+        if request.method == "POST":
+            tryb = request.form.get("tryb","reczny")
+            sup  = request.form.get("supla_channel_id") or None
+            esh  = request.form.get("esphome_entity","").strip()
+            gpio = request.form.get("gpio_pin") or None
+            opis = request.form.get("opis","").strip()
+            kat  = request.form.get("kategoria","inne")
+            ex = db.execute("SELECT id FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
+            if ex:
+                db.execute("UPDATE kanal_sterowanie SET tryb=?,supla_channel_id=?,esphome_entity=?,gpio_pin=?,opis=?,kategoria=? WHERE id=?",
+                           (tryb, sup, esh, gpio, opis, kat, ex["id"]))
+            else:
+                db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,supla_channel_id,esphome_entity,gpio_pin,opis,kategoria) VALUES(?,?,?,?,?,?,?,?,?)",
+                           (g, did, kanal, tryb, sup, esh, gpio, opis, kat))
+            # Zaktualizuj też opis w urzadzenia_kanaly
+            db.execute("UPDATE urzadzenia_kanaly SET opis=? WHERE urzadzenie_id=? AND kanal=?", (opis, did, kanal))
+            db.commit(); db.close()
+            flash(f"Tryb {opis or kanal}: {tryb}")
+            return redirect("/sterowanie")
+
+        dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
+        ks  = db.execute("SELECT * FROM kanal_sterowanie WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
+        supla_ch = db.execute("SELECT id,nazwa,channel_id FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1", (g,)).fetchall()
+        harm_list = db.execute("SELECT * FROM harmonogramy WHERE urzadzenie_id=? AND kanal=? AND gospodarstwo_id=?", (did, kanal, g)).fetchall()
         db.close()
         if not dev: return redirect("/sterowanie")
-        v=dict(ks) if ks else {}; tryb_cur=v.get("tryb","reczny")
-        tryb_opt="".join(f'<option value="{tv}" {"selected" if tryb_cur==tv else ""}>{tl}</option>' for tv,tl in _TRYBY)
-        sup_opt='<option value="">— brak —</option>'+"".join(f'<option value="{s["channel_id"]}" {"selected" if str(v.get("supla_channel_id",""))==str(s["channel_id"]) else ""}>{s["nazwa"]} (ch:{s["channel_id"]})</option>' for s in supla)
-        html=(f'<h1>Tryb: {dev["nazwa"]} / {kanal}</h1><div class="card"><form method="POST">'
-            f'<label>Opis kanału</label><input name="opis" value="{v.get("opis","")}" placeholder="np. Światło kurnik, Zawór wody">'
-            f'<label>Tryb sterowania</label><select name="tryb" id="tryb-sel" onchange="showF(this.value)">{tryb_opt}</select>'
-            f'<div id="fd-s" style="margin-top:10px"><div class="al alw"><b>Supla</b> — skonfiguruj w <a href="/supla">panelu Supla</a></div>'
+
+        v = dict(ks) if ks else {}
+        tryb_cur = v.get("tryb","reczny")
+        tryb_opt = "".join(
+            f'<option value="{tv}" {"selected" if tryb_cur==tv else ""}>{tl}</option>'
+            for tv, tl in _TRYBY)
+        sup_opt = '<option value="">— brak —</option>' + "".join(
+            f'<option value="{s["channel_id"]}" {"selected" if str(v.get("supla_channel_id",""))==str(s["channel_id"]) else ""}>'
+            f'{s["nazwa"]} (ch:{s["channel_id"]})</option>'
+            for s in supla_ch)
+        _HAR_KAT2 = [("swiatlo","💡 Światło"),("brama","🚪 Brama"),("grzanie","🔥 Grzanie"),
+                     ("wentylacja","💨 Wentylacja"),("pojenie","💧 Pojenie"),("inne","⚡ Inne")]
+        kat_opt = "".join(
+            f'<option value="{kv}" {"selected" if v.get("kategoria","inne")==kv else ""}>{kl}</option>'
+            for kv, kl in _HAR_KAT2)
+
+        harm_html = ""
+        if harm_list:
+            harm_html = ('<div class="al alok" style="font-size:12px;margin-top:8px">'
+                         '⏰ Harmonogramy na tym kanale: '
+                         + ", ".join(h["nazwa"] + " " + (h["czas_wl"] or "") for h in harm_list)
+                         + f' &nbsp; <a href="/harmonogramy" style="color:#534AB7">Zarządzaj →</a>'
+                         + '</div>')
+        else:
+            harm_html = ('<div style="font-size:12px;color:#888;margin-top:8px">'
+                         'Brak harmonogramów na tym kanale. '
+                         f'<a href="/harmonogramy/dodaj" style="color:#534AB7">Dodaj →</a></div>')
+
+        html = (
+            f'<h1>Konfiguracja: {dev["nazwa"]} / {kanal}</h1>'
+            '<div class="card"><form method="POST">'
+            f'<label>Opis kanału (widoczny na dashboardzie)</label>'
+            f'<input name="opis" value="{v.get("opis","")}" placeholder="np. Światło kurnik, Brama wejściowa">'
+            f'<div class="g2"><div><label>Kategoria (ikona na dashboardzie)</label>'
+            f'<select name="kategoria">{kat_opt}</select></div>'
+            f'<div><label>Tryb sterowania</label>'
+            f'<select name="tryb" id="tryb-sel" onchange="showF(this.value)">{tryb_opt}</select></div></div>'
+            f'<div id="fd-s" style="margin-top:10px;display:none">'
+            f'<div class="al alw"><b>Supla</b> — skonfiguruj OAuth w <a href="/supla">panelu Supla</a></div>'
             f'<label>Kanał Supla</label><select name="supla_channel_id">{sup_opt}</select></div>'
-            f'<div id="fd-e" style="margin-top:10px"><div class="al alok"><b>ESPHome REST</b> — urządzenie musi mieć typ ESPHome</div>'
-            f'<label>Nazwa encji ESPHome</label><input name="esphome_entity" value="{v.get("esphome_entity","")}" placeholder="relay1"></div>'
-            f'<div id="fd-g" style="margin-top:10px"><div class="al alok"><b>GPIO RPi</b> — gdy app działa bezpośrednio na RPi</div>'
-            f'<label>Numer pinu GPIO BCM</label><input name="gpio_pin" type="number" value="{v.get("gpio_pin","") or ""}"></div>'
-            '<br><button class="btn bp">Zapisz</button><a href="/sterowanie" class="btn bo" style="margin-left:8px">Anuluj</a></form></div>'
+            f'<div id="fd-e" style="margin-top:10px;display:none">'
+            f'<div class="al alok"><b>ESPHome REST</b> — urządzenie musi mieć typ ESPHome</div>'
+            f'<label>Nazwa encji ESPHome (np. relay1)</label>'
+            f'<input name="esphome_entity" value="{v.get("esphome_entity","")}" placeholder="relay1"></div>'
+            f'<div id="fd-g" style="margin-top:10px;display:none">'
+            f'<div class="al alok"><b>GPIO RPi</b> — gdy app działa bezpośrednio na RPi</div>'
+            f'<label>Numer pinu GPIO BCM</label>'
+            f'<input name="gpio_pin" type="number" value="{v.get("gpio_pin","") or ""}"></div>'
+            + harm_html
+            + '<br><button class="btn bp">Zapisz</button>'
+            '<a href="/sterowanie" class="btn bo" style="margin-left:8px">Anuluj</a>'
+            '</form></div>'
             '<script>'
             'var _sh={"reczny":[],"supla":["s"],"gpio_rpi":["g"],"esphome":["e"],"gpio+supla":["g","s"],"esphome+supla":["e","s"]};'
-            'function showF(v){["s","g","e"].forEach(function(id){document.getElementById("fd-"+id).style.display="none";});'
-            '(_sh[v]||[]).forEach(function(id){document.getElementById("fd-"+id).style.display="block";});}'
+            'function showF(v){'
+            '  ["s","g","e"].forEach(function(id){document.getElementById("fd-"+id).style.display="none";});'
+            '  (_sh[v]||[]).forEach(function(id){document.getElementById("fd-"+id).style.display="block";}); }'
             f'showF("{tryb_cur}");'
-            '</script>')
-        return R(html,"gpio")
+            '</script>'
+        )
+        return R(html, "gpio")
 
     @app.route("/sterowanie/cmd", methods=["POST"])
     @farm_required
     def sterowanie_cmd():
-        g=gid(); data=request.get_json()
-        did=data.get("urzadzenie_id"); kanal=data.get("kanal",""); stan=data.get("stan",False)
+        g = gid(); data = request.get_json()
+        did   = data.get("urzadzenie_id")
+        kanal = data.get("kanal","")
+        stan  = data.get("stan", False)
         ok, msg = _send(did, kanal, stan, g)
-        return jsonify({"ok":ok,"msg":msg})
+        return jsonify({"ok": ok, "msg": msg})
+
 
     # ─── GPIO PWM ─────────────────────────────────────────────────────────────
     @app.route("/gpio/pwm")
@@ -1522,7 +1651,7 @@ def register_routes(app):
         if request.method == "POST":
             sekcja = request.form.get("sekcja","")
             if sekcja == "podstawowe":
-                for k in ["pasza_dzienna_kg","cena_jajka","etykieta_producent","etykieta_adres"]:
+                for k in ["pasza_dzienna_kg","cena_jajka","etykieta_producent","etykieta_adres","lat","lon"]:
                     v = request.form.get(k)
                     if v is not None: save_setting(k, v.strip(), g)
                 flash("Ustawienia podstawowe zapisane.")
@@ -2265,6 +2394,342 @@ def register_routes(app):
             + '</script>'
         )
         return R(html, "pasza")
+
+
+
+    # ════════════════════════════════════════════════════════════════════════
+    # HARMONOGRAMY — nowy, ujednolicony system
+    # ════════════════════════════════════════════════════════════════════════
+    _HAR_TYPY = [
+        ("czas_staly",    "O stałej godzinie",        "🕐"),
+        ("wschod",        "Przy wschodzie słońca",     "🌅"),
+        ("wschod_offset", "Wschód ± X minut",          "🌅"),
+        ("zachod",        "Przy zachodzie słońca",     "🌇"),
+        ("zachod_offset", "Zachód ± X minut",          "🌇"),
+    ]
+    _HAR_KAT = [
+        ("swiatlo",    "💡 Światło",         "#BA7517"),
+        ("brama",      "🚪 Brama",           "#534AB7"),
+        ("grzanie",    "🔥 Grzanie",         "#A32D2D"),
+        ("wentylacja", "💨 Wentylacja",      "#185FA5"),
+        ("pojenie",    "💧 Pojenie/zawór",   "#1D9E75"),
+        ("inne",       "⚡ Inne",            "#888780"),
+    ]
+    _DNI_PL = ["Pon","Wt","Śr","Czw","Pt","Sob","Nd"]
+
+    @app.route("/harmonogramy")
+    @farm_required
+    def harmonogramy():
+        g = gid(); db = get_db()
+        rows = db.execute("""
+            SELECT h.*, u.nazwa as urz_nazwa, u.ip, u.port
+            FROM harmonogramy h
+            LEFT JOIN urzadzenia u ON h.urzadzenie_id = u.id
+            WHERE h.gospodarstwo_id = ? ORDER BY h.kategoria, h.czas_wl
+        """, (g,)).fetchall()
+        # Wschód/zachód słońca dziś
+        from scheduler import sun_times
+        lat = float(gs("lat","52.0")); lon = float(gs("lon","20.0"))
+        sr, ss = sun_times(lat, lon)
+        db.close()
+
+        kat_map = {k: (l, c) for k, l, c in _HAR_KAT}
+
+        def _dni_str(dni_json):
+            try:
+                dni = json.loads(dni_json or "[]")
+                if not dni: return "każdy dzień"
+                return ", ".join(_DNI_PL[d] for d in sorted(dni) if d < 7)
+            except: return "każdy dzień"
+
+        def _typ_str(h):
+            typ = h["typ"] or "czas_staly"
+            wl  = h["czas_wl"] or "—"
+            wyl = h["czas_wyl"]
+            off = int(h["offset_minut"] or 0)
+            trw = int(h["czas_trwania_s"] or 0)
+            trw_str = f" → {trw}s" if trw else ""
+            if typ == "czas_staly":
+                return f"{wl}" + (f" – {wyl}" if wyl else "") + trw_str
+            elif typ == "wschod":
+                return f"Wschód ({sr or '?'})" + trw_str
+            elif typ == "zachod":
+                return f"Zachód ({ss or '?'})" + trw_str
+            elif typ == "wschod_offset":
+                sign = "+" if off >= 0 else ""
+                return f"Wschód {sign}{off}min ({sr or '?'})" + trw_str
+            elif typ == "zachod_offset":
+                sign = "+" if off >= 0 else ""
+                return f"Zachód {sign}{off}min ({ss or '?'})" + trw_str
+            return wl
+
+        # Grupuj po kategorii
+        kat_kolejnosc = [k for k, l, c in _HAR_KAT]
+        grupy = {}
+        for h in rows:
+            k = h["kategoria"] or "inne"
+            grupy.setdefault(k, []).append(h)
+
+        html = (
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+            '<h1 style="margin-bottom:0">Harmonogramy</h1>'
+            f'<span style="font-size:13px;color:#5f5e5a">🌅 {sr or "?"} &nbsp; 🌇 {ss or "?"}</span>'
+            '</div>'
+            '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+            '<a href="/harmonogramy/dodaj" class="btn bp bsm">+ Nowy harmonogram</a>'
+            '<a href="/sterowanie" class="btn bo bsm">Tryby kanałów</a>'
+            '</div>'
+        )
+
+        if not rows:
+            html += (
+                '<div class="card" style="text-align:center;padding:30px">'
+                '<div style="font-size:48px">⏰</div>'
+                '<p style="color:#888;margin-top:10px">Brak harmonogramów.</p>'
+                '<a href="/harmonogramy/dodaj" class="btn bp bsm" style="margin-top:10px">Dodaj pierwszy</a>'
+                '</div>'
+            )
+        else:
+            for kat in kat_kolejnosc:
+                if kat not in grupy: continue
+                l_kat, kol_kat = kat_map.get(kat, ("⚡ Inne", "#888"))
+                html += f'<div style="font-size:12px;font-weight:600;color:{kol_kat};text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px">{l_kat}</div>'
+                for h in grupy[kat]:
+                    on = bool(h["aktywny"])
+                    kol = kol_kat if on else "#aaa"
+                    html += (
+                        f'<div class="card" style="margin-bottom:8px;border-left:3px solid {kol}">'
+                        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+                        f'<span style="font-size:20px">{h["ikona"] or "⚡"}</span>'
+                        f'<b style="flex:1">{h["nazwa"]}</b>'
+                        f'<span style="font-size:13px;color:#534AB7;font-weight:500">{_typ_str(h)}</span>'
+                        f'<span style="font-size:12px;color:#888">{_dni_str(h["dni_tygodnia"])}</span>'
+                        f'<span style="font-size:12px;color:#5f5e5a">{h["urz_nazwa"] or "?"} / {h["kanal"] or "?"}</span>'
+                        '</div>'
+                        '<div style="display:flex;gap:6px;margin-top:8px;align-items:center">'
+                        + (f'<span style="font-size:12px;color:#888">ostatnie: {h["ostatnie_wykonanie"][:16] if h["ostatnie_wykonanie"] else "nigdy"}</span>' )
+                        + '<div style="flex:1"></div>'
+                        + f'<a href="/harmonogramy/{h["id"]}/test" class="btn bo bsm">▶ Test</a>'
+                        + f'<a href="/harmonogramy/{h["id"]}/edytuj" class="btn bo bsm">Edytuj</a>'
+                        + f'<a href="/harmonogramy/{h["id"]}/toggle" class="btn {"bg" if not on else "bo"} bsm">{"Włącz" if not on else "Wyłącz"}</a>'
+                        + f'<a href="/harmonogramy/{h["id"]}/usun" class="btn br bsm" onclick="return confirm(\'Usunąć?\')">✕</a>'
+                        + '</div></div>'
+                    )
+
+        # Scheduler status
+        from scheduler import status as sch_status
+        sch = sch_status()
+        html += (
+            f'<div class="al {"alok" if sch["running"] else "ald"}" style="margin-top:12px">'
+            f'{"✓ Scheduler działa offline" if sch["running"] else "✗ Scheduler nie działa — zrestartuj serwer"}'
+            f'</div>'
+        )
+        return R(html, "gpio")
+
+    @app.route("/harmonogramy/dodaj", methods=["GET","POST"])
+    @app.route("/harmonogramy/<int:hid>/edytuj", methods=["GET","POST"])
+    @farm_required
+    def harmonogram_form(hid=None):
+        g = gid(); db = get_db()
+        if request.method == "POST":
+            dni = request.form.getlist("dni")
+            dni_json = json.dumps([int(d) for d in dni])
+            vals = (
+                request.form.get("nazwa","").strip(),
+                request.form.get("ikona","⚡"),
+                request.form.get("kategoria","inne"),
+                request.form.get("urzadzenie_id") or None,
+                request.form.get("kanal","").strip() or None,
+                request.form.get("typ","czas_staly"),
+                request.form.get("czas_wl","").strip() or None,
+                request.form.get("czas_wyl","").strip() or None,
+                int(request.form.get("offset_minut",0) or 0),
+                int(request.form.get("czas_trwania_s",0) or 0),
+                dni_json,
+            )
+            if hid:
+                db.execute("""UPDATE harmonogramy SET nazwa=?,ikona=?,kategoria=?,urzadzenie_id=?,
+                    kanal=?,typ=?,czas_wl=?,czas_wyl=?,offset_minut=?,czas_trwania_s=?,
+                    dni_tygodnia=? WHERE id=? AND gospodarstwo_id=?""",
+                    (*vals, hid, g))
+            else:
+                db.execute("""INSERT INTO harmonogramy(nazwa,ikona,kategoria,urzadzenie_id,kanal,
+                    typ,czas_wl,czas_wyl,offset_minut,czas_trwania_s,dni_tygodnia,aktywny,gospodarstwo_id)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)""", (*vals, g))
+            db.commit(); db.close()
+            flash("Harmonogram zapisany."); return redirect("/harmonogramy")
+
+        h = dict(db.execute("SELECT * FROM harmonogramy WHERE id=? AND gospodarstwo_id=?", (hid, g)).fetchone()) if hid else {}
+        urzadz = db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1", (g,)).fetchall()
+
+        # Wschód/zachód dziś
+        from scheduler import sun_times
+        lat = float(gs("lat","52.0")); lon = float(gs("lon","20.0"))
+        sr, ss = sun_times(lat, lon)
+        db.close()
+
+        dni_cur = json.loads(h.get("dni_tygodnia") or "[]") if h else []
+        typ_cur = h.get("typ","czas_staly")
+
+        kat_opts = "".join(
+            f'<option value="{k}" {"selected" if h.get("kategoria","inne")==k else ""}>{l}</option>'
+            for k, l, _ in _HAR_KAT)
+        typ_opts = "".join(
+            f'<option value="{tv}" {"selected" if typ_cur==tv else ""}>{ico} {tl}</option>'
+            for tv, tl, ico in _HAR_TYPY)
+        u_opts = '<option value="">— brak —</option>' + "".join(
+            f'<option value="{u["id"]}" {"selected" if h.get("urzadzenie_id")==u["id"] else ""}>{u["nazwa"]}</option>'
+            for u in urzadz)
+
+        ikony = ["💡","🚪","🔥","💨","💧","⚡","🌡️","🔔","⏰","🌱"]
+        ikona_btns = "".join(
+            f'<button type="button" onclick="setIkona(\'{ico}\')" '
+            f'style="font-size:20px;background:{"#EEEDFE" if h.get("ikona","")==ico else "#fff"};'
+            f'border:1px solid #e0ddd4;border-radius:8px;padding:4px 8px;cursor:pointer" '
+            f'id="ib_{ico}">{ico}</button>'
+            for ico in ikony)
+
+        dni_btns = "".join(
+            f'<label style="cursor:pointer"><input type="checkbox" name="dni" value="{i}" '
+            f'{"checked" if i in dni_cur else ""} style="display:none">'
+            f'<span class="badge {"b-purple" if i in dni_cur else "b-gray"}" '
+            f'style="cursor:pointer;padding:5px 10px;font-size:13px" id="db_{i}">{d}</span></label>'
+            for i, d in enumerate(_DNI_PL))
+
+        # Dynamiczne pobieranie kanałów po wyborze urządzenia
+        ch_opts = ""
+        if h.get("urzadzenie_id"):
+            db2 = get_db()
+            chs = db2.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=?",
+                               (h["urzadzenie_id"],)).fetchall()
+            db2.close()
+            ch_opts = "".join(
+                f'<option value="{c["kanal"]}" {"selected" if h.get("kanal")==c["kanal"] else ""}>'
+                f'{c["opis"] or c["kanal"]}</option>'
+                for c in chs)
+
+        html = (
+            f'<h1>{"Edytuj" if hid else "Nowy"} harmonogram</h1>'
+            '<div class="card"><form method="POST" id="hform">'
+
+            '<label>Nazwa</label>'
+            f'<input name="nazwa" required value="{h.get("nazwa","")}" placeholder="np. Poranne światło, Otwarcie bramy">'
+
+            '<label>Ikona</label>'
+            f'<input type="hidden" name="ikona" id="ikona-val" value="{h.get("ikona","⚡")}">'
+            f'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">{ikona_btns}</div>'
+
+            f'<div class="g2" style="margin-top:8px"><div><label>Kategoria</label><select name="kategoria">{kat_opts}</select></div>'
+            '<div><label>Urządzenie</label>'
+            f'<select name="urzadzenie_id" id="urz-sel" onchange="loadKanaly(this.value)">{u_opts}</select></div></div>'
+
+            '<label>Kanał (przekaźnik)</label>'
+            f'<select name="kanal" id="kanal-sel">'
+            f'{"<option value="">— wybierz urządzenie —</option>" if not ch_opts else ch_opts}'
+            '</select>'
+
+            f'<label style="margin-top:10px">Typ wyzwalacza</label>'
+            f'<select name="typ" id="typ-sel" onchange="showTyp(this.value)">{typ_opts}</select>'
+
+            # Pola zależne od typu
+            f'<div id="fd-czas" style="margin-top:8px">'
+            '<div class="g2">'
+            f'<div><label>Godzina włączenia</label><input name="czas_wl" type="time" value="{h.get("czas_wl","") or ""}"></div>'
+            f'<div><label>Godzina wyłączenia (opcjonalne)</label><input name="czas_wyl" type="time" value="{h.get("czas_wyl","") or ""}"></div>'
+            '</div></div>'
+
+            f'<div id="fd-offset" style="margin-top:8px;display:none">'
+            f'<div class="al alok" style="font-size:12px">Wschód dziś: <b>{sr or "?"}</b> &nbsp; Zachód: <b>{ss or "?"}</b>'
+            f'<a href="/ustawienia/farma" style="margin-left:10px;color:#534AB7">Ustaw lokalizację →</a></div>'
+            f'<label>Offset (minuty, np. -30 = 30min przed)</label>'
+            f'<input name="offset_minut" type="number" min="-120" max="120" value="{h.get("offset_minut",0) or 0}">'
+            '</div>'
+
+            '<div class="g2" style="margin-top:8px">'
+            f'<div><label>Czas trwania (sekundy, 0 = bez auto-wyłącz)</label>'
+            f'<input name="czas_trwania_s" type="number" min="0" max="86400" value="{h.get("czas_trwania_s",0) or 0}">'
+            '<p style="font-size:11px;color:#888;margin-top:3px">np. 30s = zawór wody, 0 = światło zostaje włączone</p>'
+            '</div>'
+            '<div><label>Dni tygodnia (puste = każdy dzień)</label>'
+            f'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px" id="dni-wrap">{dni_btns}</div></div>'
+            '</div>'
+
+            '<br><button class="btn bp" style="padding:10px 24px">Zapisz harmonogram</button>'
+            '<a href="/harmonogramy" class="btn bo" style="margin-left:8px">Anuluj</a>'
+            '</form></div>'
+
+            '<script>'
+            'function setIkona(ico){'
+            '  document.getElementById("ikona-val").value=ico;'
+            '  document.querySelectorAll("[id^=\'ib_\']").forEach(function(b){'
+            '    b.style.background=b.textContent.trim()===ico?"#EEEDFE":"#fff";'
+            '  });'
+            '}'
+            'function showTyp(v){'
+            '  document.getElementById("fd-czas").style.display=(v==="czas_staly")?"block":"none";'
+            '  document.getElementById("fd-offset").style.display=(v==="wschod_offset"||v==="zachod_offset")?"block":"none";'
+            '}'
+            f'showTyp("{typ_cur}");'
+            'function loadKanaly(uid){'
+            '  if(!uid){document.getElementById("kanal-sel").innerHTML="<option>— wybierz urządzenie —</option>";return;}'
+            '  fetch("/api/kanaly/"+uid).then(r=>r.json()).then(function(chs){'
+            '    var sel=document.getElementById("kanal-sel");'
+            '    sel.innerHTML=chs.map(function(c){return "<option value=\'"+c.kanal+"\'>"+( c.opis||c.kanal)+"</option>";}).join("");'
+            '  });'
+            '}'
+            # Dni tygodnia toggle
+            'document.querySelectorAll("[name=dni]").forEach(function(cb){'
+            '  cb.addEventListener("change",function(){'
+            '    var sp=document.getElementById("db_"+this.value);'
+            '    sp.className="badge "+(this.checked?"b-purple":"b-gray");'
+            '    sp.style.padding="5px 10px";sp.style.fontSize="13px";sp.style.cursor="pointer";'
+            '  });'
+            '});'
+            '</script>'
+        )
+        return R(html, "gpio")
+
+    @app.route("/api/kanaly/<int:uid>")
+    @farm_required
+    def api_kanaly(uid):
+        db = get_db()
+        chs = db.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=? ORDER BY kanal", (uid,)).fetchall()
+        db.close()
+        return jsonify([{"kanal": c["kanal"], "opis": c["opis"] or ""} for c in chs])
+
+    @app.route("/harmonogramy/<int:hid>/toggle")
+    @farm_required
+    def harmonogram_toggle(hid):
+        g = gid(); db = get_db()
+        db.execute("UPDATE harmonogramy SET aktywny=1-aktywny WHERE id=? AND gospodarstwo_id=?", (hid, g))
+        db.commit(); db.close(); return redirect("/harmonogramy")
+
+    @app.route("/harmonogramy/<int:hid>/usun")
+    @farm_required
+    def harmonogram_usun(hid):
+        g = gid(); db = get_db()
+        db.execute("DELETE FROM harmonogramy WHERE id=? AND gospodarstwo_id=?", (hid, g))
+        db.commit(); db.close(); flash("Usunięto."); return redirect("/harmonogramy")
+
+    @app.route("/harmonogramy/<int:hid>/test")
+    @farm_required
+    def harmonogram_test(hid):
+        """Wykonaj teraz niezależnie od godziny."""
+        g = gid(); db = get_db()
+        h = db.execute("SELECT * FROM harmonogramy WHERE id=? AND gospodarstwo_id=?", (hid, g)).fetchone()
+        db.close()
+        if not h or not h["urzadzenie_id"] or not h["kanal"]:
+            flash("Brak urządzenia lub kanału."); return redirect("/harmonogramy")
+        from scheduler import _send as sch_send
+        ok = sch_send(h["urzadzenie_id"], h["kanal"], True, g)
+        flash(f"Test {'OK ✓' if ok else 'BŁĄD ✗'} — {h['nazwa']}")
+        if ok and int(h["czas_trwania_s"] or 0) > 0:
+            import time as _t
+            sek = int(h["czas_trwania_s"])
+            did = h["urzadzenie_id"]; kanal = h["kanal"]
+            threading.Thread(target=lambda: (_t.sleep(sek), sch_send(did, kanal, False, g)), daemon=True).start()
+            flash(f"Auto-wyłącz za {sek}s")
+        return redirect("/harmonogramy")
 
 
     return app
