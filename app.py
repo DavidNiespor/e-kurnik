@@ -24,6 +24,7 @@ from devices import send_command, ping_device, ESP32_FIRMWARE
 
 # ─── MODUŁY ROZSZERZEŃ ───────────────────────────────────────────────────────
 from routes import register_routes
+from supla_oauth import register_supla_oauth_routes
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -524,8 +525,8 @@ def dashboard():
         + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
         + '<label>Zebrane jaja (szt)</label>'
         + '<input name="jaja_zebrane" type="number" min="0" value="' + (str(dzis["jaja_zebrane"]) if dzis else "") + '" style="font-size:18px;text-align:center">'
-        + '<label style="margin-top:8px">Pasza wydana (kg)</label>'
-        + '<input name="pasza_wydana_kg" type="number" step="0.1" value="' + (str(dzis["pasza_wydana_kg"]) if dzis else str(pdz)) + '">'
+
+        + '<input type="hidden" name="pasza_wydana_kg" value="' + str(pdz) + '">'
         + '<br><button class="btn bg" style="width:100%;margin-top:10px;padding:12px">Zapisz jaja</button>'
         + '</form></div>'
 
@@ -1643,6 +1644,7 @@ def admin_config():
 
 # ─── REJESTRACJA MODUŁÓW (route'y tylko — bez init DB) ──────────────────────
 register_routes(app)
+register_supla_oauth_routes(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
