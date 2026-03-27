@@ -44,63 +44,70 @@ BASE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Ferma Jaj{% if farm_name %} — {{ farm_name }}{% endif %}</title>
+<title>{% if farm_name %}{{ farm_name }} — {% endif %}Ferma Jaj</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
-nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-index:1000}
-.nav-bar{display:flex;align-items:center;padding:0 12px;height:52px;gap:0}
-.logo{font-weight:700;font-size:15px;color:#534AB7;white-space:nowrap;text-decoration:none;margin-right:8px;flex-shrink:0}
-.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;flex-shrink:1;margin-right:4px}
-/* Desktop nav items */
-.nb-item{position:relative;flex-shrink:0}
-.nb-link{display:flex;align-items:center;gap:4px;padding:0 9px;height:52px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;cursor:pointer;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none}
-.nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
-.arr{font-size:9px;opacity:.5;transition:transform .15s;pointer-events:none}
-.nb-item.open>.nb-link .arr{transform:rotate(180deg)}
-.nb-drop{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:190px;padding:4px;z-index:1100}
-.nb-drop-right{right:0;left:auto}
-.nb-item.open>.nb-drop{display:block}
-.nb-drop a{display:block;padding:10px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
-.nb-drop a:active,.nb-drop a:hover{background:#f5f5f0}
-.nb-drop a.on{color:#534AB7;font-weight:500;background:#EEEDFE}
-.nb-sep{height:1px;background:#e0ddd4;margin:4px 2px}
-/* Nav layout */
-.nav-main{display:flex;align-items:center;flex:1;overflow:visible}
-.nav-spacer{flex:1}
-.nav-user{flex-shrink:0}
-/* Hamburger - mobile only */
-.hbg{display:none;flex-direction:column;justify-content:center;align-items:center;gap:5px;width:44px;height:44px;cursor:pointer;background:none;border:none;-webkit-tap-highlight-color:transparent;border-radius:8px;flex-shrink:0;margin-left:4px}
-.hbg span{display:block;width:22px;height:2px;background:#534AB7;border-radius:2px;transition:all .25s}
-.hbg.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
-.hbg.open span:nth-child(2){opacity:0;transform:scaleX(0)}
-.hbg.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
-/* Mobile drawer */
-.nav-drawer{display:none;position:fixed;top:52px;left:0;right:0;bottom:0;background:#fff;z-index:490;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,20px)}
-.nav-drawer.open{display:block}
-.dr-section{border-bottom:1px solid #f0ede4}
-.dr-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;font-size:15px;font-weight:500;color:#2c2c2a;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;touch-action:manipulation}
-.dr-arr{font-size:11px;color:#aaa;transition:transform .2s}
-.dr-section.open .dr-arr{transform:rotate(180deg)}
-.dr-body{display:none;padding-bottom:6px}
-.dr-section.open .dr-body{display:block}
-.dr-body a{display:block;padding:13px 28px;font-size:15px;color:#5f5e5a;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-.dr-body a.on{color:#534AB7;font-weight:600}
-.dr-flat{display:block;padding:14px 18px;font-size:15px;color:#2c2c2a;text-decoration:none;-webkit-tap-highlight-color:transparent;border-bottom:1px solid #f0ede4;touch-action:manipulation}
-.dr-flat.on{color:#534AB7;font-weight:600}
-.dr-foot{padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #e0ddd4;margin-top:4px}
-/* Layout */
-.wrap{max-width:980px;margin:0 auto;padding:14px;position:relative;z-index:1}
-h1{font-size:19px;font-weight:500;margin-bottom:14px}
-h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
+
+/* ─── NAV ──────────────────────────────────────────────────────── */
+nav{background:#fff;border-bottom:2px solid #e0ddd4;position:sticky;top:0;z-index:1000;height:52px}
+.nb{display:flex;align-items:center;height:52px;padding:0 16px;gap:0}
+.nb-logo{font-weight:700;font-size:15px;color:#534AB7;text-decoration:none;white-space:nowrap;margin-right:10px}
+.nb-farm{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:500;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;margin-right:6px}
+.nb-links{display:flex;align-items:center;flex:1}
+.nb-right{display:flex;align-items:center;margin-left:auto;flex-shrink:0}
+
+/* Linki i dropdowny */
+.ni{position:relative}
+.nl{display:flex;align-items:center;gap:3px;padding:0 10px;height:52px;font-size:13px;font-weight:500;color:#5f5e5a;text-decoration:none;white-space:nowrap;cursor:pointer;background:none;border:none;border-bottom:3px solid transparent;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;transition:color .1s}
+.nl:hover,.nl.on{color:#2c2c2a;border-bottom-color:#534AB7}
+.nl .ar{font-size:8px;opacity:.4;transition:transform .15s;margin-left:1px}
+.ni.op>.nl .ar{transform:rotate(180deg)}
+.nd{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.12);min-width:200px;padding:4px;z-index:2000}
+.nd-r{right:0;left:auto}
+.ni.op>.nd{display:block}
+.nd a{display:flex;align-items:center;padding:9px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:7px;white-space:nowrap;gap:8px}
+.nd a:hover{background:#f5f5f0}
+.nd a.on{color:#534AB7;font-weight:600;background:#EEEDFE}
+.nd-sep{height:1px;background:#eee;margin:3px 6px}
+.nd-hd{padding:6px 14px 2px;font-size:10px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:.5px}
+
+/* Hamburger */
+.hbg{display:none;flex-direction:column;justify-content:center;gap:5px;width:44px;height:44px;padding:10px;cursor:pointer;background:none;border:none;margin-left:6px;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.hbg span{display:block;width:22px;height:2px;background:#534AB7;border-radius:2px;transition:all .22s}
+.hbg.op span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.hbg.op span:nth-child(2){opacity:0}
+.hbg.op span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+
+/* Drawer */
+.dr{display:none;position:fixed;inset:52px 0 0 0;background:#fff;z-index:999;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.dr.op{display:block}
+.dr-sec{border-bottom:1px solid #f0ede4}
+.dr-hd{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;font-size:15px;font-weight:600;color:#2c2c2a;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+.dr-ar{font-size:10px;color:#bbb;transition:transform .2s}
+.dr-sec.op .dr-ar{transform:rotate(180deg)}
+.dr-bd{display:none;padding-bottom:4px}
+.dr-sec.op .dr-bd{display:block}
+.dr-bd a{display:block;padding:12px 28px;font-size:14px;color:#5f5e5a;text-decoration:none;-webkit-tap-highlight-color:transparent}
+.dr-bd a.on{color:#534AB7;font-weight:600}
+.dr-fl{display:block;padding:15px 18px;font-size:15px;font-weight:500;color:#2c2c2a;text-decoration:none;border-bottom:1px solid #f0ede4;-webkit-tap-highlight-color:transparent}
+.dr-fl.on{color:#534AB7;font-weight:700}
+.dr-ft{padding:16px 18px;display:flex;justify-content:space-between;align-items:center;border-top:2px solid #eee;margin-top:4px}
+
+@media(max-width:768px){.nb-links,.nb-right .ni{display:none}.hbg{display:flex}}
+
+/* ─── LAYOUT ───────────────────────────────────────────────────── */
+.wrap{max-width:980px;margin:0 auto;padding:14px}
+h1{font-size:20px;font-weight:600;margin-bottom:14px}
+h2{font-size:14px;font-weight:600;margin:16px 0 8px;color:#444}
 .card{background:#fff;border:1px solid #e0ddd4;border-radius:12px;padding:14px;margin-bottom:12px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 @media(max-width:720px){.g3,.g4{grid-template-columns:1fr 1fr}}
 @media(max-width:480px){.g2{grid-template-columns:1fr}.g3,.g4{grid-template-columns:1fr 1fr}}
 .stat{text-align:center;padding:10px 4px}
-.stat .v{font-size:24px;font-weight:500;line-height:1.2}
+.stat .v{font-size:24px;font-weight:600;line-height:1.2}
 .stat .l{font-size:11px;color:#888;margin-top:3px}
 .stat .s{font-size:11px;color:#5f5e5a;margin-top:2px}
 .al{padding:9px 13px;border-radius:8px;margin-bottom:8px;font-size:13px}
@@ -110,234 +117,255 @@ h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
 label{display:block;font-size:12px;color:#5f5e5a;margin:8px 0 3px}
 input,select,textarea{width:100%;padding:9px 10px;border:1px solid #d3d1c7;border-radius:8px;font-size:15px;background:#fff;color:#2c2c2a;-webkit-appearance:none;appearance:none}
 input:focus,select:focus,textarea:focus{outline:none;border-color:#7F77DD}
-.btn{display:inline-block;padding:9px 16px;border-radius:8px;border:1px solid transparent;font-size:14px;cursor:pointer;text-decoration:none;font-weight:500;line-height:1.2;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-.bp{background:#534AB7;color:#fff;border-color:#534AB7}
-.bo{background:#fff;color:#534AB7;border-color:#AFA9EC}
-.bg{background:#3B6D11;color:#fff}
-.br{background:#A32D2D;color:#fff}
-.bsm{padding:6px 10px;font-size:12px}
+.btn{display:inline-flex;align-items:center;padding:9px 16px;border-radius:8px;border:1px solid transparent;font-size:14px;cursor:pointer;text-decoration:none;font-weight:500;line-height:1;-webkit-tap-highlight-color:transparent;touch-action:manipulation;gap:4px}
+.bp{background:#534AB7;color:#fff;border-color:#534AB7}.bp:hover{background:#3C3489}
+.bo{background:#fff;color:#534AB7;border-color:#AFA9EC}.bo:hover{background:#EEEDFE}
+.bg{background:#3B6D11;color:#fff}.br{background:#A32D2D;color:#fff}
+.bsm{padding:5px 10px;font-size:12px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:8px;border-bottom:1px solid #e0ddd4;font-weight:500;font-size:12px;color:#5f5e5a}
-td{padding:8px;border-bottom:1px solid #f0ede4;vertical-align:middle}
+td{padding:7px 8px;border-bottom:1px solid #f0ede4;vertical-align:middle}
 tr:last-child td{border-bottom:none}
-.badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:500}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
 .b-blue{background:#E6F1FB;color:#0C447C}.b-green{background:#EAF3DE;color:#27500A}
 .b-gray{background:#F1EFE8;color:#444}.b-red{background:#FCEBEB;color:#791F1F}
 .b-amber{background:#FAEEDA;color:#633806}.b-purple{background:#EEEDFE;color:#3C3489}
 .flash{padding:9px 13px;border-radius:8px;margin-bottom:10px;font-size:13px;background:#EAF3DE;color:#27500A;border:1px solid #C0DD97}
-.relay-card{border:1px solid #e0ddd4;border-radius:10px;padding:12px 8px;text-align:center;background:#fff;cursor:pointer;touch-action:manipulation}
+.relay-card{border:1px solid #e0ddd4;border-radius:10px;padding:12px 8px;text-align:center;background:#fff;cursor:pointer}
 .relay-on{border-color:#3B6D11;background:#f4faf0}
 .tog{display:inline-block;width:44px;height:24px;background:#d3d1c7;border-radius:12px;position:relative;transition:background .2s}
 .tog.on{background:#3B6D11}
 .tog::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .2s}
 .tog.on::after{transform:translateX(20px)}
-code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
+code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 .nowrap{white-space:nowrap}
-/* Mobile breakpoint - tylko schowaj nav-main i pokaż hamburgera */
-@media(max-width:760px){
-  .nav-main{display:none}
-  .hbg{display:flex}
-}
 </style>
 </head>
 <body>
 <nav>
-<div class="nav-bar">
-  <a href="/" class="logo">&#x1F413; Ferma</a>
+<div class="nb">
+  <a href="/" class="nb-logo">&#x1F413; Ferma</a>
   {% if farm_id %}
-  <span class="farm-badge">{{ farm_name }}</span>
-  <div class="nav-main">
-    <a href="/" class="nb-link {{ 'on' if p=='dash' }}">Dashboard</a>
-    <div class="nb-item">
-      <span class="nb-link {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="arr">&#9660;</span></span>
-      <div class="nb-drop">
-        <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
-        <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
-        <div class="nb-sep"></div>
-        <a href="/dzienne">Czynno&#347;ci dzienne</a>
+  <span class="nb-farm" title="{{ farm_name }}">{{ farm_name }}</span>
+  <div class="nb-links">
+    <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
+
+    <div class="ni">
+      <button class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="ar">&#9660;</span></button>
+      <div class="nd">
+        <a href="/produkcja" class="{{ 'on' if p=='prod' }}">&#x1F95A; Produkcja jaj</a>
+        <a href="/stado" class="{{ 'on' if p=='stado' }}">&#x1F414; Stado</a>
+        <div class="nd-sep"></div>
+        <a href="/dzienne">&#x1F4CB; Czynno&#347;ci dzienne</a>
       </div>
     </div>
-    <div class="nb-item">
-      <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzeda&#380; <span class="arr">&#9660;</span></span>
-      <div class="nb-drop">
-        <a href="/sprzedaz" class="{{ 'on' if p=='sprzedaz' }}">Historia sprzeda&#380;y</a>
-        <a href="/klienci" class="{{ 'on' if p=='klienci' }}">Klienci i salda</a>
-        <div class="nb-sep"></div>
-        <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zam&#243;wienia</a>
-        <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
+
+    <div class="ni">
+      <button class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380; <span class="ar">&#9660;</span></button>
+      <div class="nd">
+        <a href="/sprzedaz" class="{{ 'on' if p=='zam' }}">&#x1F4E6; Sprzeda&#380; i magazyn</a>
+        <div class="nd-sep"></div>
+        <a href="/zamowienia">&#x1F6D2; Zam&#243;wienia</a>
+        <a href="/klienci">&#x1F465; Klienci</a>
       </div>
     </div>
-    <div class="nb-item">
-      <span class="nb-link {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="arr">&#9660;</span></span>
-      <div class="nb-drop">
-        <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
-        <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
-        <a href="/pasza/mieszalnik">Mieszalnik</a>
-        <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
-        <a href="/energia">Energia</a>
-        <div class="nb-sep"></div>
-        <a href="/wyposazenie">Wyposa&#380;enie</a>
+
+    <div class="ni">
+      <button class="nl {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="ar">&#9660;</span></button>
+      <div class="nd">
+        <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">&#x1F4B8; Wydatki</a>
+        <a href="/pasza" class="{{ 'on' if p=='pasza' }}">&#x1F33E; Pasza</a>
+        <a href="/pasza/mieszalnik">&#x2697;&#xFE0F; Mieszalnik</a>
+        <a href="/woda" class="{{ 'on' if p=='woda' }}">&#x1F4A7; Woda</a>
+        <a href="/energia">&#x26A1; Energia</a>
+        <div class="nd-sep"></div>
+        <a href="/wyposazenie">&#x1F527; Wyposa&#380;enie</a>
       </div>
     </div>
-    <div class="nb-item">
-      <span class="nb-link {{ 'on' if p in ['gpio','urz','kal','harm'] }}">Sterowanie <span class="arr">&#9660;</span></span>
-      <div class="nb-drop">
-        <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Panel sterowania</a>
-        <a href="/gpio">GPIO / przeka&#378;niki</a>
+
+    <div class="ni">
+      <button class="nl {{ 'on' if p in ['gpio','urz','kal','harm'] }}">Sterowanie <span class="ar">&#9660;</span></button>
+      <div class="nd">
+        <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">&#x26A1; Panel sterowania</a>
         <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}">&#x23F0; Harmonogramy</a>
-        <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urz&#261;dzenia slave</a>
-        <div class="nb-sep"></div>
-        <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
-        <a href="/supla">Supla</a>
-        <a href="/ustawienia/farma">Ustawienia</a>
+        <div class="nd-sep"></div>
+        <a href="/gpio">&#x1F50C; GPIO</a>
+        <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">&#x1F4F1; Urz&#261;dzenia</a>
+        <a href="/supla">&#x2601;&#xFE0F; Supla</a>
+        <div class="nd-sep"></div>
+        <a href="/ustawienia/farma">&#x2699;&#xFE0F; Ustawienia</a>
       </div>
     </div>
-    <div class="nb-item">
-      <span class="nb-link {{ 'on' if p=='ana' }}">Analityka <span class="arr">&#9660;</span></span>
-      <div class="nb-drop">
-        <a href="/analityka" class="{{ 'on' if p=='ana' }}">Wykresy</a>
-        <a href="/pasza/analityka">Analiza paszy</a>
-        <a href="/pasza/skladniki-baza">Baza sk&#322;adnik&#243;w</a>
-      </div>
-    </div>
-    <div class="nav-spacer"></div>
-    <div class="nb-item nav-user">
-      <span class="nb-link" style="font-size:12px">{{ login }} <span class="arr">&#9660;</span></span>
-      <div class="nb-drop nb-drop-right">
-        <a href="/konto">Moje konto</a>
-        <a href="/wybierz-gospodarstwo">Zmie&#324; farm&#281;</a>
-        <a href="/ustawienia/farma">Ustawienia farmy</a>
-        <a href="/import/xlsx">Import xlsx</a>
-        {% if rola == 'superadmin' %}
-        <div class="nb-sep"></div>
-        <a href="/admin" class="{{ 'on' if p=='admin' }}">Panel admina</a>
-        {% endif %}
-        <div class="nb-sep"></div>
-        <a href="/wyloguj" style="color:#A32D2D;font-weight:600">Wyloguj</a>
+
+    <div class="ni">
+      <button class="nl {{ 'on' if p=='ana' }}">Analityka <span class="ar">&#9660;</span></button>
+      <div class="nd">
+        <a href="/analityka" class="{{ 'on' if p=='ana' }}">&#x1F4CA; Wykresy</a>
+        <a href="/pasza/analityka">&#x1F9EA; Analiza paszy</a>
+        <a href="/pasza/skladniki-baza">&#x1F4DA; Baza sk&#322;adnik&#243;w</a>
       </div>
     </div>
   </div>
-  <button class="hbg" id="hbg" aria-label="Menu" onclick="toggleDrawer(event)">
+
+  <div class="nb-right">
+    <div class="ni">
+      <button class="nl" style="font-size:12px">{{ login }} <span class="ar">&#9660;</span></button>
+      <div class="nd nd-r">
+        <a href="/konto">&#x1F464; Moje konto</a>
+        <a href="/wybierz-gospodarstwo">&#x1F3E0; Zmie&#324; farm&#281;</a>
+        <a href="/ustawienia/farma">&#x2699;&#xFE0F; Ustawienia farmy</a>
+        <a href="/import/xlsx">&#x1F4C2; Import xlsx</a>
+        {% if rola == 'superadmin' %}
+        <div class="nd-sep"></div>
+        <a href="/admin" class="{{ 'on' if p=='admin' }}">&#x1F6E1;&#xFE0F; Panel admina</a>
+        {% endif %}
+        <div class="nd-sep"></div>
+        <a href="/wyloguj" style="color:#A32D2D;font-weight:600">&#x1F6AA; Wyloguj</a>
+      </div>
+    </div>
+  </div>
+
+  <button class="hbg" id="hbg" onclick="nbToggle(event)">
     <span></span><span></span><span></span>
   </button>
+
   {% else %}
-  <div class="nav-spacer"></div>
-  <a href="/login" class="nb-link">Zaloguj</a>
+  <div style="margin-left:auto">
+    <a href="/login" class="nl">Zaloguj</a>
+  </div>
   {% endif %}
 </div>
 </nav>
+
 {% if farm_id %}
-<div class="nav-drawer" id="drawer">
-  <a href="/" class="dr-flat {{ 'on' if p=='dash' }}" onclick="closeDrawer()">&#x1F3E0; Dashboard</a>
-  <div class="dr-section" id="drs-hod">
-    <div class="dr-head" onclick="toggleSec('drs-hod')"><span>&#x1F414; Hodowla</span><span class="dr-arr">&#9660;</span></div>
-    <div class="dr-body">
-      <a href="/produkcja" class="{{ 'on' if p=='prod' }}" onclick="closeDrawer()">Produkcja jaj</a>
-      <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="closeDrawer()">Stado</a>
-      <a href="/dzienne" onclick="closeDrawer()">Czynno&#347;ci dzienne</a>
+<div class="dr" id="dr">
+  <a href="/" class="dr-fl {{ 'on' if p=='dash' }}" onclick="drClose()">&#x1F3E0; Dashboard</a>
+
+  <div class="dr-sec" id="ds-hod">
+    <div class="dr-hd" onclick="drSec('ds-hod')">
+      <span>&#x1F414; Hodowla</span><span class="dr-ar">&#9660;</span>
+    </div>
+    <div class="dr-bd">
+      <a href="/produkcja" class="{{ 'on' if p=='prod' }}" onclick="drClose()">Produkcja jaj</a>
+      <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="drClose()">Stado</a>
+      <a href="/dzienne" onclick="drClose()">Czynno&#347;ci dzienne</a>
     </div>
   </div>
-  <div class="dr-section" id="drs-spr">
-    <div class="dr-head" onclick="toggleSec('drs-spr')"><span>&#x1F6D2; Sprzeda&#380;</span><span class="dr-arr">&#9660;</span></div>
-    <div class="dr-body">
-      <a href="/sprzedaz" onclick="closeDrawer()">Historia sprzeda&#380;y</a>
-      <a href="/klienci" onclick="closeDrawer()">Klienci i salda</a>
-      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="closeDrawer()">Zam&#243;wienia</a>
-      <a href="/magazyn" class="{{ 'on' if p=='mag' }}" onclick="closeDrawer()">Magazyn jaj</a>
+
+  <div class="dr-sec" id="ds-spr">
+    <div class="dr-hd" onclick="drSec('ds-spr')">
+      <span>&#x1F4E6; Sprzeda&#380;</span><span class="dr-ar">&#9660;</span>
+    </div>
+    <div class="dr-bd">
+      <a href="/sprzedaz" onclick="drClose()">Sprzeda&#380; i magazyn</a>
+      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="drClose()">Zam&#243;wienia</a>
+      <a href="/klienci" onclick="drClose()">Klienci</a>
     </div>
   </div>
-  <div class="dr-section" id="drs-zas">
-    <div class="dr-head" onclick="toggleSec('drs-zas')"><span>&#x1F33E; Zasoby</span><span class="dr-arr">&#9660;</span></div>
-    <div class="dr-body">
-      <a href="/wydatki" class="{{ 'on' if p=='wyd' }}" onclick="closeDrawer()">Wydatki</a>
-      <a href="/pasza" class="{{ 'on' if p=='pasza' }}" onclick="closeDrawer()">Pasza</a>
-      <a href="/pasza/mieszalnik" onclick="closeDrawer()">Mieszalnik</a>
-      <a href="/woda" class="{{ 'on' if p=='woda' }}" onclick="closeDrawer()">Woda</a>
-      <a href="/energia" onclick="closeDrawer()">Energia</a>
-      <a href="/wyposazenie" onclick="closeDrawer()">Wyposa&#380;enie</a>
+
+  <div class="dr-sec" id="ds-zas">
+    <div class="dr-hd" onclick="drSec('ds-zas')">
+      <span>&#x1F33E; Zasoby</span><span class="dr-ar">&#9660;</span>
+    </div>
+    <div class="dr-bd">
+      <a href="/wydatki" class="{{ 'on' if p=='wyd' }}" onclick="drClose()">Wydatki</a>
+      <a href="/pasza" class="{{ 'on' if p=='pasza' }}" onclick="drClose()">Pasza</a>
+      <a href="/pasza/mieszalnik" onclick="drClose()">Mieszalnik</a>
+      <a href="/woda" class="{{ 'on' if p=='woda' }}" onclick="drClose()">Woda</a>
+      <a href="/energia" onclick="drClose()">Energia</a>
+      <a href="/wyposazenie" onclick="drClose()">Wyposa&#380;enie</a>
     </div>
   </div>
-  <div class="dr-section" id="drs-ste">
-    <div class="dr-head" onclick="toggleSec('drs-ste')"><span>&#x26A1; Sterowanie</span><span class="dr-arr">&#9660;</span></div>
-    <div class="dr-body">
-      <a href="/sterowanie" onclick="closeDrawer()">Panel sterowania</a>
-      <a href="/gpio" onclick="closeDrawer()">GPIO / przeka&#378;niki</a>
-      <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}" onclick="closeDrawer()">&#x23F0; Harmonogramy</a>
-      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="closeDrawer()">Urz&#261;dzenia slave</a>
-      <a href="/kalendarz" class="{{ 'on' if p=='kal' }}" onclick="closeDrawer()">Kalendarz</a>
-      <a href="/supla" onclick="closeDrawer()">Supla</a>
-      <a href="/ustawienia/farma" onclick="closeDrawer()">Ustawienia</a>
+
+  <div class="dr-sec" id="ds-ste">
+    <div class="dr-hd" onclick="drSec('ds-ste')">
+      <span>&#x26A1; Sterowanie</span><span class="dr-ar">&#9660;</span>
+    </div>
+    <div class="dr-bd">
+      <a href="/sterowanie" onclick="drClose()">Panel sterowania</a>
+      <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}" onclick="drClose()">&#x23F0; Harmonogramy</a>
+      <a href="/gpio" onclick="drClose()">GPIO</a>
+      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="drClose()">Urz&#261;dzenia</a>
+      <a href="/supla" onclick="drClose()">Supla</a>
+      <a href="/ustawienia/farma" onclick="drClose()">Ustawienia</a>
     </div>
   </div>
-  <div class="dr-section" id="drs-ana">
-    <div class="dr-head" onclick="toggleSec('drs-ana')"><span>&#x1F4CA; Analityka</span><span class="dr-arr">&#9660;</span></div>
-    <div class="dr-body">
-      <a href="/analityka" class="{{ 'on' if p=='ana' }}" onclick="closeDrawer()">Wykresy</a>
-      <a href="/pasza/analityka" onclick="closeDrawer()">Analiza paszy</a>
-      <a href="/pasza/skladniki-baza" onclick="closeDrawer()">Baza sk&#322;adnik&#243;w</a>
+
+  <div class="dr-sec" id="ds-ana">
+    <div class="dr-hd" onclick="drSec('ds-ana')">
+      <span>&#x1F4CA; Analityka</span><span class="dr-ar">&#9660;</span>
+    </div>
+    <div class="dr-bd">
+      <a href="/analityka" class="{{ 'on' if p=='ana' }}" onclick="drClose()">Wykresy</a>
+      <a href="/pasza/analityka" onclick="drClose()">Analiza paszy</a>
+      <a href="/pasza/skladniki-baza" onclick="drClose()">Baza sk&#322;adnik&#243;w</a>
     </div>
   </div>
-  <div class="dr-foot">
-    <span style="font-size:13px;color:#888">{{ login }}</span>
-    <div style="display:flex;gap:16px">
-      <a href="/konto" style="font-size:14px;color:#534AB7">Konto</a>
-      <a href="/wyloguj" style="font-size:14px;color:#A32D2D;font-weight:600">Wyloguj</a>
+
+  <div class="dr-ft">
+    <span style="font-size:13px;color:#888">{{ login }} &middot; {{ farm_name }}</span>
+    <div style="display:flex;gap:14px">
+      <a href="/konto" style="font-size:13px;color:#534AB7">Konto</a>
+      <a href="/wyloguj" style="font-size:13px;color:#A32D2D;font-weight:700">Wyloguj</a>
     </div>
   </div>
 </div>
 {% endif %}
+
 <script>
 (function(){
-  // Dropdowny przez klik (dziala na iOS, desktop)
-  document.querySelectorAll('.nb-item').forEach(function(item){
-    var trigger = item.querySelector('.nb-link');
-    if(!trigger) return;
-    trigger.addEventListener('click', function(e){
+  // Desktop dropdowny — klik (działa na iOS i desktop)
+  document.querySelectorAll('.ni').forEach(function(ni){
+    var btn = ni.querySelector('.nl');
+    if(!btn) return;
+    btn.addEventListener('click',function(e){
       e.stopPropagation();
-      var wasOpen = item.classList.contains('open');
-      document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
-      if(!wasOpen) item.classList.add('open');
+      var was = ni.classList.contains('op');
+      document.querySelectorAll('.ni.op').forEach(function(x){x.classList.remove('op');});
+      if(!was) ni.classList.add('op');
     });
-    // Klik w link w dropdown - nie blokuj nawigacji
-    item.querySelectorAll('.nb-drop a').forEach(function(a){
-      a.addEventListener('click', function(e){
+    ni.querySelectorAll('.nd a').forEach(function(a){
+      a.addEventListener('click',function(e){
         e.stopPropagation();
-        document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
-        // Nawigacja idzie normalnie
+        document.querySelectorAll('.ni.op').forEach(function(x){x.classList.remove('op');});
       });
     });
   });
-  document.addEventListener('click', function(){
-    document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
+  document.addEventListener('click',function(){
+    document.querySelectorAll('.ni.op').forEach(function(x){x.classList.remove('op');});
   });
-  // Mobile drawer
-  window.toggleDrawer = function(e){
+
+  // Mobile hamburger + drawer
+  function nbToggle(e){
     if(e) e.stopPropagation();
-    var d = document.getElementById('drawer');
-    var b = document.getElementById('hbg');
+    var d=document.getElementById('dr'),b=document.getElementById('hbg');
     if(!d) return;
-    var opening = !d.classList.contains('open');
-    d.classList.toggle('open', opening);
-    if(b) b.classList.toggle('open', opening);
-    document.body.style.overflow = opening ? 'hidden' : '';
-  };
-  window.closeDrawer = function(){
-    var d = document.getElementById('drawer');
-    var b = document.getElementById('hbg');
-    if(!d) return;
-    d.classList.remove('open');
-    if(b) b.classList.remove('open');
-    document.body.style.overflow = '';
-  };
-  window.toggleSec = function(id){
-    document.getElementById(id).classList.toggle('open');
-  };
-  var active = document.querySelector('.dr-body a.on');
-  if(active){var sec=active.closest('.dr-section');if(sec)sec.classList.add('open');}
+    var op=!d.classList.contains('op');
+    d.classList.toggle('op',op);
+    b.classList.toggle('op',op);
+    document.body.style.overflow=op?'hidden':'';
+  }
+  function drClose(){
+    var d=document.getElementById('dr'),b=document.getElementById('hbg');
+    if(d){d.classList.remove('op');}
+    if(b){b.classList.remove('op');}
+    document.body.style.overflow='';
+  }
+  function drSec(id){
+    document.getElementById(id).classList.toggle('op');
+  }
+  window.nbToggle=nbToggle;
+  window.drClose=drClose;
+  window.drSec=drSec;
+
+  // Auto-otwórz aktywną sekcję w drawerze
+  var act=document.querySelector('.dr-bd a.on');
+  if(act){var s=act.closest('.dr-sec');if(s)s.classList.add('op');}
 })();
 </script>
+
 {% for msg in get_flashed_messages() %}
-<div class="flash" style="max-width:980px;margin:8px auto 0;padding:10px 14px">{{ msg }}</div>
+<div class="flash" style="max-width:980px;margin:8px auto 0">{{ msg }}</div>
 {% endfor %}
 <div class="wrap">{{ content }}</div>
 </body>
