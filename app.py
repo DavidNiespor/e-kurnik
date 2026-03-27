@@ -47,26 +47,33 @@ BASE = """<!DOCTYPE html>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
 nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-index:500}
-.nav-bar{display:flex;align-items:center;padding:0 12px;height:52px;gap:4px}
-.logo{font-weight:700;font-size:15px;color:#534AB7;white-space:nowrap;text-decoration:none;margin-right:6px;flex-shrink:0}
-.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;flex-shrink:1}
-.nav-links{display:flex;align-items:center;gap:0;flex:1;overflow:hidden}
-.nav-right{display:flex;align-items:center;gap:2px;margin-left:auto;flex-shrink:0}
+.nav-bar{display:flex;align-items:center;padding:0 12px;height:52px;gap:0}
+.logo{font-weight:700;font-size:15px;color:#534AB7;white-space:nowrap;text-decoration:none;margin-right:8px;flex-shrink:0}
+.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;flex-shrink:1;margin-right:4px}
+/* Desktop nav items */
 .nb-item{position:relative;flex-shrink:0}
-.nb-link{display:flex;align-items:center;gap:4px;padding:0 8px;height:52px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;cursor:pointer;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.nb-link{display:flex;align-items:center;gap:4px;padding:0 9px;height:52px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;cursor:pointer;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none}
 .nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
 .arr{font-size:9px;opacity:.5;transition:transform .15s;pointer-events:none}
 .nb-item.open>.nb-link .arr{transform:rotate(180deg)}
 .nb-drop{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);min-width:190px;padding:4px;z-index:600}
+.nb-drop-right{right:0;left:auto}
 .nb-item.open>.nb-drop{display:block}
 .nb-drop a{display:block;padding:10px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+.nb-drop a:active,.nb-drop a:hover{background:#f5f5f0}
 .nb-drop a.on{color:#534AB7;font-weight:500;background:#EEEDFE}
 .nb-sep{height:1px;background:#e0ddd4;margin:4px 2px}
-.hbg{display:none;flex-direction:column;justify-content:center;align-items:center;gap:5px;width:40px;height:40px;cursor:pointer;background:none;border:none;-webkit-tap-highlight-color:transparent;border-radius:8px;flex-shrink:0;margin-left:4px}
-.hbg span{display:block;width:22px;height:2px;background:#534AB7;border-radius:2px;transition:all .2s}
+/* Nav layout */
+.nav-main{display:flex;align-items:center;flex:1;overflow:hidden}
+.nav-spacer{flex:1}
+.nav-user{flex-shrink:0}
+/* Hamburger - mobile only */
+.hbg{display:none;flex-direction:column;justify-content:center;align-items:center;gap:5px;width:44px;height:44px;cursor:pointer;background:none;border:none;-webkit-tap-highlight-color:transparent;border-radius:8px;flex-shrink:0;margin-left:4px}
+.hbg span{display:block;width:22px;height:2px;background:#534AB7;border-radius:2px;transition:all .25s}
 .hbg.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
 .hbg.open span:nth-child(2){opacity:0;transform:scaleX(0)}
 .hbg.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+/* Mobile drawer */
 .nav-drawer{display:none;position:fixed;top:52px;left:0;right:0;bottom:0;background:#fff;z-index:490;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,20px)}
 .nav-drawer.open{display:block}
 .dr-section{border-bottom:1px solid #f0ede4}
@@ -80,6 +87,7 @@ nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-inde
 .dr-flat{display:block;padding:14px 18px;font-size:15px;color:#2c2c2a;text-decoration:none;-webkit-tap-highlight-color:transparent;border-bottom:1px solid #f0ede4;touch-action:manipulation}
 .dr-flat.on{color:#534AB7;font-weight:600}
 .dr-foot{padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #e0ddd4;margin-top:4px}
+/* Layout */
 .wrap{max-width:980px;margin:0 auto;padding:14px}
 h1{font-size:19px;font-weight:500;margin-bottom:14px}
 h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
@@ -123,7 +131,11 @@ tr:last-child td{border-bottom:none}
 .tog.on::after{transform:translateX(20px)}
 code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
 .nowrap{white-space:nowrap}
-@media(max-width:760px){.nav-links,.nav-right .nb-item{display:none}.hbg{display:flex}}
+/* Mobile breakpoint - tylko schowaj nav-main i pokaż hamburgera */
+@media(max-width:760px){
+  .nav-main{display:none}
+  .hbg{display:flex}
+}
 </style>
 </head>
 <body>
@@ -132,7 +144,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <a href="/" class="logo">&#x1F413; Ferma</a>
   {% if farm_id %}
   <span class="farm-badge">{{ farm_name }}</span>
-  <div class="nav-links">
+  <div class="nav-main">
     <a href="/" class="nb-link {{ 'on' if p=='dash' }}">Dashboard</a>
     <div class="nb-item">
       <span class="nb-link {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="arr">&#9660;</span></span>
@@ -140,13 +152,13 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
         <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
         <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
         <div class="nb-sep"></div>
-        <a href="/dzienne">Czynności dzienne</a>
+        <a href="/dzienne">Czynno&#347;ci dzienne</a>
       </div>
     </div>
     <div class="nb-item">
-      <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzedaż <span class="arr">&#9660;</span></span>
+      <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzeda&#380; <span class="arr">&#9660;</span></span>
       <div class="nb-drop">
-        <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zamówienia</a>
+        <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zam&#243;wienia</a>
         <a href="/klienci">Klienci</a>
         <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
       </div>
@@ -160,19 +172,19 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
         <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
         <a href="/energia">Energia</a>
         <div class="nb-sep"></div>
-        <a href="/wyposazenie">Wyposażenie</a>
+        <a href="/wyposazenie">Wyposa&#380;enie</a>
       </div>
     </div>
     <div class="nb-item">
       <span class="nb-link {{ 'on' if p in ['gpio','urz','kal','harm'] }}">Sterowanie <span class="arr">&#9660;</span></span>
       <div class="nb-drop">
         <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Panel sterowania</a>
-        <a href="/gpio">GPIO / przekaźniki</a>
+        <a href="/gpio">GPIO / przeka&#378;niki</a>
         <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}">&#x23F0; Harmonogramy</a>
-        <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
+        <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urz&#261;dzenia slave</a>
         <div class="nb-sep"></div>
         <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
-        <a href="/pojenie">Pojenie</a>
+        <a href="/supla">Supla</a>
         <a href="/ustawienia/farma">Ustawienia</a>
       </div>
     </div>
@@ -181,18 +193,15 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       <div class="nb-drop">
         <a href="/analityka" class="{{ 'on' if p=='ana' }}">Wykresy</a>
         <a href="/pasza/analityka">Analiza paszy</a>
-        <a href="/pasza/skladniki-baza">Baza składników</a>
+        <a href="/pasza/skladniki-baza">Baza sk&#322;adnik&#243;w</a>
       </div>
     </div>
-  </div>
-  {% endif %}
-  <div class="nav-right">
-    {% if farm_id %}
-    <div class="nb-item">
+    <div class="nav-spacer"></div>
+    <div class="nb-item nav-user">
       <span class="nb-link" style="font-size:12px">{{ login }} <span class="arr">&#9660;</span></span>
-      <div class="nb-drop" style="right:0;left:auto">
+      <div class="nb-drop nb-drop-right">
         <a href="/konto">Moje konto</a>
-        <a href="/wybierz-gospodarstwo">Zmień farmę</a>
+        <a href="/wybierz-gospodarstwo">Zmie&#324; farm&#281;</a>
         <a href="/ustawienia/farma">Ustawienia farmy</a>
         <a href="/import/xlsx">Import xlsx</a>
         {% if rola == 'superadmin' %}
@@ -200,17 +209,16 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
         <a href="/admin" class="{{ 'on' if p=='admin' }}">Panel admina</a>
         {% endif %}
         <div class="nb-sep"></div>
-        <a href="/wyloguj" style="color:#A32D2D">Wyloguj</a>
+        <a href="/wyloguj" style="color:#A32D2D;font-weight:600">Wyloguj</a>
       </div>
     </div>
-    {% else %}
-    <a href="/login" class="nb-link">Zaloguj</a>
-    {% endif %}
   </div>
-  {% if farm_id %}
   <button class="hbg" id="hbg" aria-label="Menu" onclick="toggleDrawer(event)">
     <span></span><span></span><span></span>
   </button>
+  {% else %}
+  <div class="nav-spacer"></div>
+  <a href="/login" class="nb-link">Zaloguj</a>
   {% endif %}
 </div>
 </nav>
@@ -222,13 +230,13 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
     <div class="dr-body">
       <a href="/produkcja" class="{{ 'on' if p=='prod' }}" onclick="closeDrawer()">Produkcja jaj</a>
       <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="closeDrawer()">Stado</a>
-      <a href="/dzienne" onclick="closeDrawer()">Czynności dzienne</a>
+      <a href="/dzienne" onclick="closeDrawer()">Czynno&#347;ci dzienne</a>
     </div>
   </div>
   <div class="dr-section" id="drs-spr">
-    <div class="dr-head" onclick="toggleSec('drs-spr')"><span>&#x1F6D2; Sprzedaż</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-head" onclick="toggleSec('drs-spr')"><span>&#x1F6D2; Sprzeda&#380;</span><span class="dr-arr">&#9660;</span></div>
     <div class="dr-body">
-      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="closeDrawer()">Zamówienia</a>
+      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="closeDrawer()">Zam&#243;wienia</a>
       <a href="/klienci" onclick="closeDrawer()">Klienci</a>
       <a href="/magazyn" class="{{ 'on' if p=='mag' }}" onclick="closeDrawer()">Magazyn jaj</a>
     </div>
@@ -241,18 +249,17 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       <a href="/pasza/mieszalnik" onclick="closeDrawer()">Mieszalnik</a>
       <a href="/woda" class="{{ 'on' if p=='woda' }}" onclick="closeDrawer()">Woda</a>
       <a href="/energia" onclick="closeDrawer()">Energia</a>
-      <a href="/wyposazenie" onclick="closeDrawer()">Wyposażenie</a>
+      <a href="/wyposazenie" onclick="closeDrawer()">Wyposa&#380;enie</a>
     </div>
   </div>
   <div class="dr-section" id="drs-ste">
     <div class="dr-head" onclick="toggleSec('drs-ste')"><span>&#x26A1; Sterowanie</span><span class="dr-arr">&#9660;</span></div>
     <div class="dr-body">
       <a href="/sterowanie" onclick="closeDrawer()">Panel sterowania</a>
-      <a href="/gpio" onclick="closeDrawer()">GPIO / przekaźniki</a>
+      <a href="/gpio" onclick="closeDrawer()">GPIO / przeka&#378;niki</a>
       <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}" onclick="closeDrawer()">&#x23F0; Harmonogramy</a>
-      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="closeDrawer()">Urządzenia slave</a>
+      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="closeDrawer()">Urz&#261;dzenia slave</a>
       <a href="/kalendarz" class="{{ 'on' if p=='kal' }}" onclick="closeDrawer()">Kalendarz</a>
-      <a href="/pojenie" onclick="closeDrawer()">Pojenie</a>
       <a href="/supla" onclick="closeDrawer()">Supla</a>
       <a href="/ustawienia/farma" onclick="closeDrawer()">Ustawienia</a>
     </div>
@@ -262,21 +269,21 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
     <div class="dr-body">
       <a href="/analityka" class="{{ 'on' if p=='ana' }}" onclick="closeDrawer()">Wykresy</a>
       <a href="/pasza/analityka" onclick="closeDrawer()">Analiza paszy</a>
-      <a href="/pasza/skladniki-baza" onclick="closeDrawer()">Baza składników</a>
+      <a href="/pasza/skladniki-baza" onclick="closeDrawer()">Baza sk&#322;adnik&#243;w</a>
     </div>
   </div>
   <div class="dr-foot">
     <span style="font-size:13px;color:#888">{{ login }}</span>
-    <div style="display:flex;gap:12px">
-      <a href="/konto" style="font-size:13px;color:#534AB7">Konto</a>
-      <a href="/wyloguj" style="font-size:13px;color:#A32D2D;font-weight:600">Wyloguj</a>
+    <div style="display:flex;gap:16px">
+      <a href="/konto" style="font-size:14px;color:#534AB7">Konto</a>
+      <a href="/wyloguj" style="font-size:14px;color:#A32D2D;font-weight:600">Wyloguj</a>
     </div>
   </div>
 </div>
 {% endif %}
 <script>
 (function(){
-  // Desktop: klik zamiast hover (dziala na iOS)
+  // Dropdowny przez klik (dziala na iOS, desktop)
   document.querySelectorAll('.nb-item').forEach(function(item){
     var trigger = item.querySelector('.nb-link');
     if(!trigger) return;
@@ -285,6 +292,14 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
       var wasOpen = item.classList.contains('open');
       document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
       if(!wasOpen) item.classList.add('open');
+    });
+    // Klik w link w dropdown - nie blokuj nawigacji
+    item.querySelectorAll('.nb-drop a').forEach(function(a){
+      a.addEventListener('click', function(e){
+        e.stopPropagation();
+        document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
+        // Nawigacja idzie normalnie
+      });
     });
   });
   document.addEventListener('click', function(){
@@ -298,7 +313,7 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
     if(!d) return;
     var opening = !d.classList.contains('open');
     d.classList.toggle('open', opening);
-    b.classList.toggle('open', opening);
+    if(b) b.classList.toggle('open', opening);
     document.body.style.overflow = opening ? 'hidden' : '';
   };
   window.closeDrawer = function(){
@@ -312,9 +327,8 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   window.toggleSec = function(id){
     document.getElementById(id).classList.toggle('open');
   };
-  // Auto-otwierz aktywna sekcje
   var active = document.querySelector('.dr-body a.on');
-  if(active){ var sec = active.closest('.dr-section'); if(sec) sec.classList.add('open'); }
+  if(active){var sec=active.closest('.dr-section');if(sec)sec.classList.add('open');}
 })();
 </script>
 {% for msg in get_flashed_messages() %}
@@ -447,6 +461,7 @@ def rejestracja():
     )
 
 @app.route("/logout")
+@app.route("/wyloguj")
 def logout():
     session.clear()
     return redirect("/login")
