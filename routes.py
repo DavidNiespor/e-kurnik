@@ -123,7 +123,7 @@ def _send_cmd_local(did, kanal, stan, g):
 
 def register_routes(app):
     from db import get_db, get_setting, save_setting
-    from auth import farm_required, login_required, superadmin_required
+    from auth import farm_required, login_required, superadmin_required, current_user
     from app import R
 
     def gid(): return session.get("farm_id")
@@ -2122,12 +2122,114 @@ def register_routes(app):
             '</div></div>'
         )
 
-        html = '<h1>Ustawienia farmy</h1>' + s_podst + s_media + s_supla + s_gpio + s_skroty
+        # Sekcja: użytkownicy farmy
+        db2 = get_db()
+        farm_users = db2.execute("""
+            SELECT u.id, u.login, u.email, ug.rola
+            FROM uzytkownicy u
+            JOIN uzytkownicy_gospodarstwa ug ON ug.uzytkownik_id=u.id
+            WHERE ug.gospodarstwo_id=?
+            ORDER BY CASE ug.rola WHEN 'owner' THEN 0 ELSE 1 END, u.login
+        """, (g,)).fetchall()
+        uid_current, _, _ = current_user()
+        db2.close()
+
+        ROLE_BADGE = {'owner': 'b-purple', 'member': 'b-blue', 'viewer': 'b-gray'}
+        ROLE_LABEL = {'owner': '👑 Owner', 'member': '✏️ Member', 'viewer': '👁 Viewer'}
+
+        u_rows = ''.join(
+            '<tr>'
+            '<td style="font-weight:500">' + u['login'] + '</td>'
+            '<td style="color:#888;font-size:12px">' + (u['email'] or '') + '</td>'
+            '<td><span class="badge ' + ROLE_BADGE.get(u['rola'], 'b-gray') + '">' + ROLE_LABEL.get(u['rola'], u['rola']) + '</span></td>'
+            '<td class="nowrap">'
+            + ('<a href="/ustawienia/farma/usun-uzytkownika/' + str(u['id']) + '" class="btn br bsm" '
+               'onclick="return confirm(\'Usunąć dostęp?\')">Usuń dostęp</a>'
+               if u['id'] != uid_current else '<span style="color:#888;font-size:12px">Ty</span>')
+            + '</td></tr>'
+            for u in farm_users
+        )
+
+        s_uzytkownicy = (
+            '<div class="card"><b>👥 Użytkownicy farmy</b>'
+            '<div style="overflow-x:auto"><table style="margin-top:10px;font-size:13px"><thead><tr>'
+            '<th>Login</th><th>Email</th><th>Rola</th><th></th>'
+            '</tr></thead><tbody>'
+            + u_rows +
+            '</tbody></table></div>'
+            '<details style="margin-top:12px"><summary style="cursor:pointer;color:#534AB7;font-size:13px">'
+            '+ Dodaj użytkownika do farmy</summary>'
+            '<form method="POST" action="/ustawienia/farma/dodaj-uzytkownika" style="margin-top:10px">'
+            '<div class="g2">'
+            '<div><label>Login lub email użytkownika</label>'
+            '<input name="login_lub_email" required placeholder="np. jan.kowalski"></div>'
+            '<div><label>Rola</label>'
+            '<select name="rola">'
+            '<option value="member">✏️ Member — może edytować dane</option>'
+            '<option value="viewer">👁 Viewer — tylko podgląd</option>'
+            '<option value="owner">👑 Owner — pełny dostęp</option>'
+            '</select></div>'
+            '</div>'
+            '<button class="btn bp bsm" style="margin-top:10px">Dodaj do farmy</button>'
+            '</form></details>'
+            '</div>'
+        )
+
+        html = '<h1>Ustawienia farmy</h1>' + s_podst + s_media + s_uzytkownicy + s_supla + s_gpio + s_skroty
         return R(html, "ust")
 
 
 
-    # ─── API: lista składników do autocomplete w wydatkach ───────────────────
+    @app.route("/ustawienia/farma/dodaj-uzytkownika", methods=["POST"])
+    @farm_required
+    def farma_dodaj_uzytkownika():
+        g = gid()
+        login_lub_email = request.form.get("login_lub_email", "").strip()
+        rola = request.form.get("rola", "member")
+        if rola not in ("owner", "member", "viewer"):
+            rola = "member"
+        if not login_lub_email:
+            flash("Podaj login lub email użytkownika.")
+            return redirect("/ustawienia/farma")
+        db = get_db()
+        user = db.execute(
+            "SELECT id, login FROM uzytkownicy WHERE login=? OR email=?",
+            (login_lub_email, login_lub_email)).fetchone()
+        if not user:
+            db.close()
+            flash(f"Nie znaleziono użytkownika: {login_lub_email}")
+            return redirect("/ustawienia/farma")
+        existing = db.execute(
+            "SELECT id FROM uzytkownicy_gospodarstwa WHERE uzytkownik_id=? AND gospodarstwo_id=?",
+            (user["id"], g)).fetchone()
+        if existing:
+            db.execute("UPDATE uzytkownicy_gospodarstwa SET rola=? WHERE uzytkownik_id=? AND gospodarstwo_id=?",
+                       (rola, user["id"], g))
+            flash(f"Zaktualizowano rolę {user['login']} → {rola}")
+        else:
+            db.execute("INSERT INTO uzytkownicy_gospodarstwa(uzytkownik_id,gospodarstwo_id,rola) VALUES(?,?,?)",
+                       (user["id"], g, rola))
+            flash(f"Dodano {user['login']} do farmy (rola: {rola})")
+        db.commit(); db.close()
+        return redirect("/ustawienia/farma")
+
+    @app.route("/ustawienia/farma/usun-uzytkownika/<int:uid_del>")
+    @farm_required
+    def farma_usun_uzytkownika(uid_del):
+        g = gid()
+        uid_me, _, _ = current_user()
+        if uid_del == uid_me:
+            flash("Nie możesz usunąć siebie z farmy.")
+            return redirect("/ustawienia/farma")
+        db = get_db()
+        u = db.execute("SELECT login FROM uzytkownicy WHERE id=?", (uid_del,)).fetchone()
+        db.execute("DELETE FROM uzytkownicy_gospodarstwa WHERE uzytkownik_id=? AND gospodarstwo_id=?",
+                   (uid_del, g))
+        db.commit(); db.close()
+        flash(f"Usunięto dostęp: {u['login'] if u else uid_del}")
+        return redirect("/ustawienia/farma")
+
+        # ─── API: lista składników do autocomplete w wydatkach ───────────────────
     @app.route("/api/zboze-lista")
     @farm_required
     def api_zboze_lista():
