@@ -41,27 +41,45 @@ BASE = """<!DOCTYPE html>
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Ferma Jaj{% if farm_name %} — {{ farm_name }}{% endif %}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
-nav{background:#fff;border-bottom:1px solid #e0ddd4;padding:0 12px;display:flex;align-items:center;gap:2px;position:sticky;top:0;z-index:200;height:48px}
-nav .logo{font-weight:700;font-size:15px;color:#534AB7;padding-right:12px;white-space:nowrap}
-.nb-item{position:relative}
-.nb-link{display:flex;align-items:center;gap:4px;padding:0 10px;height:48px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
-.nb-link:hover,.nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
-.nb-link .arr{font-size:9px;opacity:0.5;transition:transform .15s}
-.nb-item:hover .arr{transform:rotate(180deg)}
-.nb-drop{display:none;position:absolute;top:48px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.08);min-width:180px;padding:4px;z-index:300}
-.nb-item:hover .nb-drop{display:block}
-.nb-drop a{display:block;padding:8px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap}
-.nb-drop a:hover{background:#f5f5f0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
+nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-index:500}
+.nav-bar{display:flex;align-items:center;padding:0 12px;height:52px;gap:4px}
+.logo{font-weight:700;font-size:15px;color:#534AB7;white-space:nowrap;text-decoration:none;margin-right:6px;flex-shrink:0}
+.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;flex-shrink:1}
+.nav-links{display:flex;align-items:center;gap:0;flex:1;overflow:hidden}
+.nav-right{display:flex;align-items:center;gap:2px;margin-left:auto;flex-shrink:0}
+.nb-item{position:relative;flex-shrink:0}
+.nb-link{display:flex;align-items:center;gap:4px;padding:0 8px;height:52px;text-decoration:none;color:#5f5e5a;font-size:13px;white-space:nowrap;cursor:pointer;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
+.arr{font-size:9px;opacity:.5;transition:transform .15s;pointer-events:none}
+.nb-item.open>.nb-link .arr{transform:rotate(180deg)}
+.nb-drop{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);min-width:190px;padding:4px;z-index:600}
+.nb-item.open>.nb-drop{display:block}
+.nb-drop a{display:block;padding:10px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 .nb-drop a.on{color:#534AB7;font-weight:500;background:#EEEDFE}
-.nb-sep{height:1px;background:#e0ddd4;margin:4px 0}
-.nb-right{margin-left:auto;display:flex;align-items:center;gap:4px}
-.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:500;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
-.farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:500;margin-left:4px}
+.nb-sep{height:1px;background:#e0ddd4;margin:4px 2px}
+.hbg{display:none;flex-direction:column;justify-content:center;align-items:center;gap:5px;width:40px;height:40px;cursor:pointer;background:none;border:none;-webkit-tap-highlight-color:transparent;border-radius:8px;flex-shrink:0;margin-left:4px}
+.hbg span{display:block;width:22px;height:2px;background:#534AB7;border-radius:2px;transition:all .2s}
+.hbg.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.hbg.open span:nth-child(2){opacity:0;transform:scaleX(0)}
+.hbg.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+.nav-drawer{display:none;position:fixed;top:52px;left:0;right:0;bottom:0;background:#fff;z-index:490;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,20px)}
+.nav-drawer.open{display:block}
+.dr-section{border-bottom:1px solid #f0ede4}
+.dr-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;font-size:15px;font-weight:500;color:#2c2c2a;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;touch-action:manipulation}
+.dr-arr{font-size:11px;color:#aaa;transition:transform .2s}
+.dr-section.open .dr-arr{transform:rotate(180deg)}
+.dr-body{display:none;padding-bottom:6px}
+.dr-section.open .dr-body{display:block}
+.dr-body a{display:block;padding:13px 28px;font-size:15px;color:#5f5e5a;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.dr-body a.on{color:#534AB7;font-weight:600}
+.dr-flat{display:block;padding:14px 18px;font-size:15px;color:#2c2c2a;text-decoration:none;-webkit-tap-highlight-color:transparent;border-bottom:1px solid #f0ede4;touch-action:manipulation}
+.dr-flat.on{color:#534AB7;font-weight:600}
+.dr-foot{padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #e0ddd4;margin-top:4px}
 .wrap{max-width:980px;margin:0 auto;padding:14px}
 h1{font-size:19px;font-weight:500;margin-bottom:14px}
 h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
@@ -69,7 +87,8 @@ h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:600px){.g3,.g4{grid-template-columns:1fr 1fr}.g2{grid-template-columns:1fr}}
+@media(max-width:720px){.g3,.g4{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.g2{grid-template-columns:1fr}.g3,.g4{grid-template-columns:1fr 1fr}}
 .stat{text-align:center;padding:10px 4px}
 .stat .v{font-size:24px;font-weight:500;line-height:1.2}
 .stat .l{font-size:11px;color:#888;margin-top:3px}
@@ -79,23 +98,24 @@ h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
 .alw{background:#FAEEDA;border:1px solid #FAC775;color:#633806}
 .alok{background:#EAF3DE;border:1px solid #C0DD97;color:#27500A}
 label{display:block;font-size:12px;color:#5f5e5a;margin:8px 0 3px}
-input,select,textarea{width:100%;padding:8px 10px;border:1px solid #d3d1c7;border-radius:8px;font-size:14px;background:#fff;color:#2c2c2a}
+input,select,textarea{width:100%;padding:9px 10px;border:1px solid #d3d1c7;border-radius:8px;font-size:15px;background:#fff;color:#2c2c2a;-webkit-appearance:none;appearance:none}
 input:focus,select:focus,textarea:focus{outline:none;border-color:#7F77DD}
-.btn{display:inline-block;padding:8px 16px;border-radius:8px;border:1px solid transparent;font-size:14px;cursor:pointer;text-decoration:none;font-weight:500;line-height:1.2}
-.bp{background:#534AB7;color:#fff;border-color:#534AB7}.bp:hover{background:#3C3489}
-.bo{background:#fff;color:#534AB7;border-color:#AFA9EC}.bo:hover{background:#EEEDFE}
-.bg{background:#3B6D11;color:#fff}.br{background:#A32D2D;color:#fff}
-.bsm{padding:5px 10px;font-size:12px}
+.btn{display:inline-block;padding:9px 16px;border-radius:8px;border:1px solid transparent;font-size:14px;cursor:pointer;text-decoration:none;font-weight:500;line-height:1.2;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.bp{background:#534AB7;color:#fff;border-color:#534AB7}
+.bo{background:#fff;color:#534AB7;border-color:#AFA9EC}
+.bg{background:#3B6D11;color:#fff}
+.br{background:#A32D2D;color:#fff}
+.bsm{padding:6px 10px;font-size:12px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:7px 8px;border-bottom:1px solid #e0ddd4;font-weight:500;font-size:12px;color:#5f5e5a}
-td{padding:7px 8px;border-bottom:1px solid #f0ede4;vertical-align:middle}
+th{text-align:left;padding:8px;border-bottom:1px solid #e0ddd4;font-weight:500;font-size:12px;color:#5f5e5a}
+td{padding:8px;border-bottom:1px solid #f0ede4;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 .badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:500}
 .b-blue{background:#E6F1FB;color:#0C447C}.b-green{background:#EAF3DE;color:#27500A}
 .b-gray{background:#F1EFE8;color:#444}.b-red{background:#FCEBEB;color:#791F1F}
 .b-amber{background:#FAEEDA;color:#633806}.b-purple{background:#EEEDFE;color:#3C3489}
 .flash{padding:9px 13px;border-radius:8px;margin-bottom:10px;font-size:13px;background:#EAF3DE;color:#27500A;border:1px solid #C0DD97}
-.relay-card{border:1px solid #e0ddd4;border-radius:10px;padding:12px 8px;text-align:center;background:#fff;cursor:pointer}
+.relay-card{border:1px solid #e0ddd4;border-radius:10px;padding:12px 8px;text-align:center;background:#fff;cursor:pointer;touch-action:manipulation}
 .relay-on{border-color:#3B6D11;background:#f4faf0}
 .tog{display:inline-block;width:44px;height:24px;background:#d3d1c7;border-radius:12px;position:relative;transition:background .2s}
 .tog.on{background:#3B6D11}
@@ -103,94 +123,207 @@ tr:last-child td{border-bottom:none}
 .tog.on::after{transform:translateX(20px)}
 code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
 .nowrap{white-space:nowrap}
+@media(max-width:760px){.nav-links,.nav-right .nb-item{display:none}.hbg{display:flex}}
 </style>
 </head>
 <body>
 <nav>
-  <span class="logo">&#x1F413; Ferma</span>
+<div class="nav-bar">
+  <a href="/" class="logo">&#x1F413; Ferma</a>
   {% if farm_id %}
-  <span class="farm-badge" title="{{ farm_name }}">{{ farm_name }}</span>
-  <a href="/" class="nb-link {{ 'on' if p=='dash' }}">Dashboard</a>
-  <div class="nb-item">
-    <span class="nb-link {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="arr">&#9660;</span></span>
-    <div class="nb-drop">
-      <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
-      <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
-      <div class="nb-sep"></div>
-      <a href="/dzienne">Czynności dzienne</a>
+  <span class="farm-badge">{{ farm_name }}</span>
+  <div class="nav-links">
+    <a href="/" class="nb-link {{ 'on' if p=='dash' }}">Dashboard</a>
+    <div class="nb-item">
+      <span class="nb-link {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="arr">&#9660;</span></span>
+      <div class="nb-drop">
+        <a href="/produkcja" class="{{ 'on' if p=='prod' }}">Produkcja jaj</a>
+        <a href="/stado" class="{{ 'on' if p=='stado' }}">Stado</a>
+        <div class="nb-sep"></div>
+        <a href="/dzienne">Czynności dzienne</a>
+      </div>
     </div>
-  </div>
-  <div class="nb-item">
-    <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzedaż <span class="arr">&#9660;</span></span>
-    <div class="nb-drop">
-      <a href="/sprzedaz" class="{{ 'on' if p=='sprzedaz' }}">Sprzedaj jaja</a>
-      <div class="nb-sep"></div>
-      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zamówienia</a>
-      <a href="/klienci">Klienci</a>
-      <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
+    <div class="nb-item">
+      <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzedaż <span class="arr">&#9660;</span></span>
+      <div class="nb-drop">
+        <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zamówienia</a>
+        <a href="/klienci">Klienci</a>
+        <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
+      </div>
     </div>
-  </div>
-  <div class="nb-item">
-    <span class="nb-link {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="arr">&#9660;</span></span>
-    <div class="nb-drop">
-      <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
-      <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
-      <a href="/pasza/mieszalnik">Mieszalnik</a>
-      <a href="/pasza/predykcja">Predykcja paszy</a>
-      <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
-      <a href="/energia">Energia</a>
-      <div class="nb-sep"></div>
-      <a href="/wyposazenie" class="{{ 'on' if p=='wyp' }}">Wyposażenie</a>
+    <div class="nb-item">
+      <span class="nb-link {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="arr">&#9660;</span></span>
+      <div class="nb-drop">
+        <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">Wydatki</a>
+        <a href="/pasza" class="{{ 'on' if p=='pasza' }}">Pasza</a>
+        <a href="/pasza/mieszalnik">Mieszalnik</a>
+        <a href="/woda" class="{{ 'on' if p=='woda' }}">Woda</a>
+        <a href="/energia">Energia</a>
+        <div class="nb-sep"></div>
+        <a href="/wyposazenie">Wyposażenie</a>
+      </div>
     </div>
-  </div>
-  <div class="nb-item">
-    <span class="nb-link {{ 'on' if p in ['gpio','urz','kal'] }}">Sterowanie <span class="arr">&#9660;</span></span>
-    <div class="nb-drop">
-      <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Panel sterowania</a>
-      <a href="/gpio" class="{{ 'on' if p=='gpio' }}">GPIO / przekaźniki</a>
-      <a href="/gpio/pwm">LED PWM</a>
-      <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}">⏰ Harmonogramy</a>
-      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
-      <div class="nb-sep"></div>
-      <a href="/harmonogramy">Harmonogramy</a>
-      <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
-      <div class="nb-sep"></div>
-      <a href="/ustawienia/farma">Ustawienia i integracje</a>
+    <div class="nb-item">
+      <span class="nb-link {{ 'on' if p in ['gpio','urz','kal','harm'] }}">Sterowanie <span class="arr">&#9660;</span></span>
+      <div class="nb-drop">
+        <a href="/sterowanie" class="{{ 'on' if p=='gpio' }}">Panel sterowania</a>
+        <a href="/gpio">GPIO / przekaźniki</a>
+        <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}">&#x23F0; Harmonogramy</a>
+        <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}">Urządzenia slave</a>
+        <div class="nb-sep"></div>
+        <a href="/kalendarz" class="{{ 'on' if p=='kal' }}">Kalendarz</a>
+        <a href="/pojenie">Pojenie</a>
+        <a href="/ustawienia/farma">Ustawienia</a>
+      </div>
     </div>
-  </div>
-  <div class="nb-item">
-    <span class="nb-link {{ 'on' if p=='ana' }}">Analityka <span class="arr">&#9660;</span></span>
-    <div class="nb-drop">
-      <a href="/analityka" class="{{ 'on' if p=='ana' }}">Wykresy</a>
-      <a href="/pasza/analityka">Analiza paszy</a>
-      <a href="/pasza/skladniki-baza">Baza składników</a>
+    <div class="nb-item">
+      <span class="nb-link {{ 'on' if p=='ana' }}">Analityka <span class="arr">&#9660;</span></span>
+      <div class="nb-drop">
+        <a href="/analityka" class="{{ 'on' if p=='ana' }}">Wykresy</a>
+        <a href="/pasza/analityka">Analiza paszy</a>
+        <a href="/pasza/skladniki-baza">Baza składników</a>
+      </div>
     </div>
   </div>
   {% endif %}
-  <div class="nb-right">
-    <a href="/wybierz-gospodarstwo" class="nb-link {{ 'on' if p=='farms' }}" title="Zmień gospodarstwo">&#x1F3E1;</a>
+  <div class="nav-right">
+    {% if farm_id %}
     <div class="nb-item">
-      <span class="nb-link">{{ login }} <span class="arr">&#9660;</span></span>
+      <span class="nb-link" style="font-size:12px">{{ login }} <span class="arr">&#9660;</span></span>
       <div class="nb-drop" style="right:0;left:auto">
         <a href="/konto">Moje konto</a>
+        <a href="/wybierz-gospodarstwo">Zmień farmę</a>
         <a href="/ustawienia/farma">Ustawienia farmy</a>
         <a href="/import/xlsx">Import xlsx</a>
         {% if rola == 'superadmin' %}
         <div class="nb-sep"></div>
         <a href="/admin" class="{{ 'on' if p=='admin' }}">Panel admina</a>
-        <a href="/admin/farm-assign">Przypisz farmy</a>
         {% endif %}
         <div class="nb-sep"></div>
-        <a href="/logout" style="color:#A32D2D">Wyloguj</a>
+        <a href="/wyloguj" style="color:#A32D2D">Wyloguj</a>
       </div>
     </div>
+    {% else %}
+    <a href="/login" class="nb-link">Zaloguj</a>
+    {% endif %}
   </div>
-</nav>
-<div class="wrap">
-{% with msgs = get_flashed_messages() %}{% if msgs %}{% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}
-{{ content }}
+  {% if farm_id %}
+  <button class="hbg" id="hbg" aria-label="Menu" onclick="toggleDrawer(event)">
+    <span></span><span></span><span></span>
+  </button>
+  {% endif %}
 </div>
-</body></html>"""
+</nav>
+{% if farm_id %}
+<div class="nav-drawer" id="drawer">
+  <a href="/" class="dr-flat {{ 'on' if p=='dash' }}" onclick="closeDrawer()">&#x1F3E0; Dashboard</a>
+  <div class="dr-section" id="drs-hod">
+    <div class="dr-head" onclick="toggleSec('drs-hod')"><span>&#x1F414; Hodowla</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-body">
+      <a href="/produkcja" class="{{ 'on' if p=='prod' }}" onclick="closeDrawer()">Produkcja jaj</a>
+      <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="closeDrawer()">Stado</a>
+      <a href="/dzienne" onclick="closeDrawer()">Czynności dzienne</a>
+    </div>
+  </div>
+  <div class="dr-section" id="drs-spr">
+    <div class="dr-head" onclick="toggleSec('drs-spr')"><span>&#x1F6D2; Sprzedaż</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-body">
+      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="closeDrawer()">Zamówienia</a>
+      <a href="/klienci" onclick="closeDrawer()">Klienci</a>
+      <a href="/magazyn" class="{{ 'on' if p=='mag' }}" onclick="closeDrawer()">Magazyn jaj</a>
+    </div>
+  </div>
+  <div class="dr-section" id="drs-zas">
+    <div class="dr-head" onclick="toggleSec('drs-zas')"><span>&#x1F33E; Zasoby</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-body">
+      <a href="/wydatki" class="{{ 'on' if p=='wyd' }}" onclick="closeDrawer()">Wydatki</a>
+      <a href="/pasza" class="{{ 'on' if p=='pasza' }}" onclick="closeDrawer()">Pasza</a>
+      <a href="/pasza/mieszalnik" onclick="closeDrawer()">Mieszalnik</a>
+      <a href="/woda" class="{{ 'on' if p=='woda' }}" onclick="closeDrawer()">Woda</a>
+      <a href="/energia" onclick="closeDrawer()">Energia</a>
+      <a href="/wyposazenie" onclick="closeDrawer()">Wyposażenie</a>
+    </div>
+  </div>
+  <div class="dr-section" id="drs-ste">
+    <div class="dr-head" onclick="toggleSec('drs-ste')"><span>&#x26A1; Sterowanie</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-body">
+      <a href="/sterowanie" onclick="closeDrawer()">Panel sterowania</a>
+      <a href="/gpio" onclick="closeDrawer()">GPIO / przekaźniki</a>
+      <a href="/harmonogramy" class="{{ 'on' if p=='harm' }}" onclick="closeDrawer()">&#x23F0; Harmonogramy</a>
+      <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="closeDrawer()">Urządzenia slave</a>
+      <a href="/kalendarz" class="{{ 'on' if p=='kal' }}" onclick="closeDrawer()">Kalendarz</a>
+      <a href="/pojenie" onclick="closeDrawer()">Pojenie</a>
+      <a href="/supla" onclick="closeDrawer()">Supla</a>
+      <a href="/ustawienia/farma" onclick="closeDrawer()">Ustawienia</a>
+    </div>
+  </div>
+  <div class="dr-section" id="drs-ana">
+    <div class="dr-head" onclick="toggleSec('drs-ana')"><span>&#x1F4CA; Analityka</span><span class="dr-arr">&#9660;</span></div>
+    <div class="dr-body">
+      <a href="/analityka" class="{{ 'on' if p=='ana' }}" onclick="closeDrawer()">Wykresy</a>
+      <a href="/pasza/analityka" onclick="closeDrawer()">Analiza paszy</a>
+      <a href="/pasza/skladniki-baza" onclick="closeDrawer()">Baza składników</a>
+    </div>
+  </div>
+  <div class="dr-foot">
+    <span style="font-size:13px;color:#888">{{ login }}</span>
+    <div style="display:flex;gap:12px">
+      <a href="/konto" style="font-size:13px;color:#534AB7">Konto</a>
+      <a href="/wyloguj" style="font-size:13px;color:#A32D2D;font-weight:600">Wyloguj</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+<script>
+(function(){
+  // Desktop: klik zamiast hover (dziala na iOS)
+  document.querySelectorAll('.nb-item').forEach(function(item){
+    var trigger = item.querySelector('.nb-link');
+    if(!trigger) return;
+    trigger.addEventListener('click', function(e){
+      e.stopPropagation();
+      var wasOpen = item.classList.contains('open');
+      document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
+      if(!wasOpen) item.classList.add('open');
+    });
+  });
+  document.addEventListener('click', function(){
+    document.querySelectorAll('.nb-item.open').forEach(function(o){o.classList.remove('open');});
+  });
+  // Mobile drawer
+  window.toggleDrawer = function(e){
+    if(e) e.stopPropagation();
+    var d = document.getElementById('drawer');
+    var b = document.getElementById('hbg');
+    if(!d) return;
+    var opening = !d.classList.contains('open');
+    d.classList.toggle('open', opening);
+    b.classList.toggle('open', opening);
+    document.body.style.overflow = opening ? 'hidden' : '';
+  };
+  window.closeDrawer = function(){
+    var d = document.getElementById('drawer');
+    var b = document.getElementById('hbg');
+    if(!d) return;
+    d.classList.remove('open');
+    if(b) b.classList.remove('open');
+    document.body.style.overflow = '';
+  };
+  window.toggleSec = function(id){
+    document.getElementById(id).classList.toggle('open');
+  };
+  // Auto-otwierz aktywna sekcje
+  var active = document.querySelector('.dr-body a.on');
+  if(active){ var sec = active.closest('.dr-section'); if(sec) sec.classList.add('open'); }
+})();
+</script>
+{% for msg in get_flashed_messages() %}
+<div class="flash" style="max-width:980px;margin:8px auto 0;padding:10px 14px">{{ msg }}</div>
+{% endfor %}
+<div class="wrap">{{ content }}</div>
+</body>
+</html>
+"""
 
 def R(html, p=""):
     uid, login, rola = current_user()
@@ -483,21 +616,85 @@ def dashboard():
                 al_html += '<div class="al alw">Za ' + str(diff) + ' dni: <b>' + k["nazwa"] + '</b></div>'
         except: pass
 
-    # Urządzenia mini-panel
-    urz_html = ""
-    for u in urzadz:
-        db2 = get_db()
-        chs = db2.execute("SELECT * FROM urzadzenia_kanaly WHERE urzadzenie_id=? ORDER BY kanal", (u["id"],)).fetchall()
-        db2.close()
-        for ch in chs:
-            on = bool(ch["stan"])
-            urz_html += (
-                '<div class="relay-card ' + ('relay-on' if on else '') + '" onclick="togDev(' + str(u["id"]) + ',\'' + ch["kanal"] + '\',' + ('false' if on else 'true') + ')">'
-                '<div class="tog ' + ('on' if on else '') + '" id="tog-' + str(u["id"]) + '-' + ch["kanal"] + '"></div>'
-                '<div style="font-size:11px;margin-top:4px;font-weight:500">' + (ch["opis"] or ch["kanal"]) + '</div>'
-                '<div style="font-size:10px;color:#888">' + u["nazwa"] + '</div>'
-                '</div>'
-            )
+    # ── STAŁE KAFELKI STEROWANIA ─────────────────────────────────────────
+    FIXED_CH = [
+        ("swiatlo_kurnik",   "💡", "Światło kurnik",    "swiatlo"),
+        ("swiatlo_obejscie", "💡", "Światło obejście",  "swiatlo"),
+        ("swiatlo_gniazda",  "💡", "Światło gniazda",   "swiatlo"),
+        ("wentylacja",       "💨", "Wentylacja",         "wentylacja"),
+        ("dozowanie_paszy",  "🌾", "Dozowanie paszy",    "pojenie"),
+        ("dozowanie_wody",   "💧", "Dozowanie wody",     "pojenie"),
+    ]
+    db2 = get_db()
+    kanal_cfg = {}
+    for fkey, fico, flabel, fkat in FIXED_CH:
+        cfg = db2.execute(
+            "SELECT ks.urzadzenie_id, ks.kanal, ks.opis, uc.stan "
+            "FROM kanal_sterowanie ks "
+            "LEFT JOIN urzadzenia_kanaly uc "
+            "  ON uc.urzadzenie_id=ks.urzadzenie_id AND uc.kanal=ks.kanal "
+            "WHERE ks.gospodarstwo_id=? AND ks.kategoria=? "
+            "ORDER BY ks.id LIMIT 1", (g, fkat)).fetchone()
+        kanal_cfg[fkey] = dict(cfg) if cfg else None
+    woda_dzis  = float(db2.execute("SELECT COALESCE(SUM(litry),0) as s FROM woda_reczna WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
+    prad_dzis  = float(db2.execute("SELECT COALESCE(SUM(kwh),0) as s FROM prad_odczyty WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
+    pasza_dzis = float(db2.execute("SELECT COALESCE(SUM(pasza_wydana_kg),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
+    db2.close()
+
+    def _kaf(fkey, fico, flabel, fkat):
+        cfg = kanal_cfg.get(fkey)
+        on  = bool(cfg and cfg.get("stan"))
+        ok  = cfg is not None
+        did = cfg["urzadzenie_id"] if cfg else None
+        kan = cfg["kanal"] if cfg else None
+        bc  = "#3B6D11" if on else ("#7F77DD" if ok else "#e0ddd4")
+        bg  = "#f4faf0" if on else "#fff"
+        dot = ("<span style='color:#3B6D11;font-weight:600'>● ON</span>" if on
+               else ("<span style='color:#888'>○ OFF</span>" if ok
+               else "<span style='color:#bbb;font-size:10px'>⚙ ustaw</span>"))
+        ns  = "false" if on else "true"
+        oc  = ("tR(" + str(did) + ",'" + str(kan) + "'," + ns + ")" if (ok and did and kan)
+               else "window.location='/sterowanie'")
+        return (
+            "<div style='border:2px solid " + bc + ";border-radius:12px;padding:12px 6px;"
+            "text-align:center;background:" + bg + ";cursor:pointer;transition:all .15s;"
+            "touch-action:manipulation' onclick=\"" + oc + "\">"
+            "<div style='font-size:24px;line-height:1'>" + fico + "</div>"
+            "<div style='font-size:11px;font-weight:600;margin-top:5px;color:#2c2c2a;line-height:1.3'>" + flabel + "</div>"
+            "<div style='font-size:10px;margin-top:3px'>" + dot + "</div>"
+            "</div>"
+        )
+
+    kafelki_ster = "".join(_kaf(*ch) for ch in FIXED_CH)
+    zuzycia_kaf = (
+        "<div style='border:2px solid #e0ddd4;border-radius:12px;padding:12px 6px;background:#fff'>"
+        "<div style='font-size:24px;text-align:center'>📊</div>"
+        "<div style='font-size:11px;font-weight:600;text-align:center;margin-top:5px;color:#2c2c2a'>Zużycia dziś</div>"
+        "<div style='margin-top:6px;font-size:11px'>"
+        "<div style='display:flex;justify-content:space-between;padding:2px'><span>💧</span><b>" + str(round(woda_dzis,1)) + " L</b></div>"
+        "<div style='display:flex;justify-content:space-between;padding:2px'><span>🌾</span><b>" + str(round(pasza_dzis,1)) + " kg</b></div>"
+        "<div style='display:flex;justify-content:space-between;padding:2px'><span>⚡</span><b>" + str(round(prad_dzis,2)) + " kWh</b></div>"
+        "</div></div>"
+    )
+
+    sterowanie_html = (
+        "<div class='card' style='margin-bottom:12px'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>"
+        "<b>Sterowanie</b>"
+        "<a href='/sterowanie' style='font-size:12px;color:#534AB7'>Konfiguruj →</a>"
+        "</div>"
+        "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:8px'>"
+        + kafelki_ster + zuzycia_kaf +
+        "</div>"
+        "<script>function tR(d,c,s){"
+        "fetch('/sterowanie/cmd',{method:'POST',headers:{'Content-Type':'application/json'},"
+        "body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})})"
+        ".then(r=>r.json()).then(function(j){if(j.ok)location.reload();"
+        "else alert('Blad: '+(j.msg||'?'));});"
+        "}"
+        "</script>"
+        "</div>"
+    )
 
     # Data po polsku
     _dni_pl = ['Poniedziałek','Wtorek','Środa','Czwartek','Piątek','Sobota','Niedziela']
@@ -517,8 +714,7 @@ def dashboard():
         '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,0)) + ' zł</div><div class="l">Przychód miesiąc</div><div class="s">wydatki: ' + str(round(wyd,0)) + ' zł</div></div>'
         '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
         '</div>'
-        + (('<div class="card"><b>Przekaźniki</b><div class="g4" style="margin-top:10px">' + urz_html + '</div>'
-            '<a href="/gpio" style="font-size:12px;color:#534AB7;display:block;margin-top:6px">Pełny panel →</a></div>') if urz_html else '')
+        + sterowanie_html
         + _kafelki_czynnosci(g)
         + '<div class="g2">'
 
@@ -529,7 +725,6 @@ def dashboard():
         + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
         + '<label>Zebrane jaja (szt)</label>'
         + '<input name="jaja_zebrane" type="number" min="0" value="' + (str(dzis["jaja_zebrane"]) if dzis else "") + '" style="font-size:18px;text-align:center">'
-
         + '<input type="hidden" name="pasza_wydana_kg" value="' + str(pdz) + '">'
         + '<br><button class="btn bg" style="width:100%;margin-top:10px;padding:12px">Zapisz jaja</button>'
         + '</form></div>'
@@ -562,21 +757,21 @@ def dashboard():
         + '</div>'  # end g2
 
         # Formularz 3: Pasza + Woda
-        + '<div class="card" style="margin-top:4px">'  
+        + '<div class="card" style="margin-top:4px">'
         + '<b>Pasza i woda — dziś</b>'
         + '<form method="POST" action="/dzienne/media" style="margin-top:10px">'
         + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-        + '<div class="g3">'
+        + '<div class="g2">'
         + '<div><label>Pasza dodana (kg)</label>'
         + '<input name="pasza_kg" type="number" step="0.1" min="0" placeholder="kg"></div>'
         + '<div><label>Woda dolana (litry)</label>'
         + '<input name="woda_l" type="number" step="0.5" min="0" placeholder="L"></div>'
-        + '<div><label>Uwagi</label><input name="uwagi" placeholder="opcjonalnie"></div>'
         + '</div>'
         + '<button class="btn bo bsm" style="margin-top:8px">Zapisz mediów</button>'
         + '</form></div>'
     )
     return R(html, "dash")
+
 
 # ─── PRODUKCJA ────────────────────────────────────────────────────────────────
 @app.route("/produkcja")
@@ -1039,6 +1234,7 @@ def wydatki_dodaj():
         db.execute("INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,cena_jednostkowa,wartosc_total,dostawca,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (g, request.form.get("data",date.today().isoformat()), kat, naz, il, jedn, cj, tot,
              request.form.get("dostawca",""), request.form.get("uwagi","")))
+        # Aktualizuj magazyn pasz/suplementów
         if kat in ("Zboże/pasza","Witaminy/suplementy") and naz and il > 0:
             ex = db.execute("SELECT id FROM stan_magazynu WHERE gospodarstwo_id=? AND nazwa=? AND kategoria=?", (g,naz,kat)).fetchone()
             if ex:
@@ -1046,8 +1242,13 @@ def wydatki_dodaj():
             else:
                 db.execute("INSERT INTO stan_magazynu(gospodarstwo_id,kategoria,nazwa,jednostka,stan,cena_aktualna) VALUES(?,?,?,?,?,?)",
                            (g,kat,naz,jedn,il,cj))
+            # Zaktualizuj też cenę w bazie składników (PLN/T) jeśli cena znana
+            if cj > 0:
+                cena_t = round(cj * 1000, 2)  # zł/kg → PLN/T
+                db.execute("UPDATE skladniki_baza SET cena_pln_t=? WHERE LOWER(TRIM(nazwa))=LOWER(TRIM(?))",
+                           (cena_t, naz))
         db.commit(); db.close()
-        flash("Wydatek zapisany.")
+        flash("Wydatek zapisany" + (f" — cena {naz}: {round(cj,2)} zł/kg" if cj > 0 and naz else "") + ".")
         return redirect(request.form.get("next","/wydatki"))
 
     kat_opt = "".join(

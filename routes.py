@@ -705,89 +705,29 @@ def register_routes(app):
     @app.route("/sterowanie")
     @farm_required
     def sterowanie():
+        from sterowanie_views import render_sterowanie
         g = gid(); db = get_db()
-        kanaly = db.execute("""
-            SELECT uc.kanal, uc.stan, uc.opis, uc.urzadzenie_id,
-                   u.nazwa as urz_nazwa, u.typ as urz_typ, u.ip, u.port,
-                   ks.tryb, ks.opis as k_opis, ks.kategoria
-            FROM urzadzenia_kanaly uc
-            JOIN urzadzenia u ON uc.urzadzenie_id = u.id
-            LEFT JOIN kanal_sterowanie ks
-                ON ks.urzadzenie_id=uc.urzadzenie_id AND ks.kanal=uc.kanal
-            WHERE u.gospodarstwo_id=? AND u.aktywne=1
-            ORDER BY u.nazwa, uc.kanal""", (g,)).fetchall()
+        kanaly = db.execute(
+            "SELECT uc.kanal, uc.stan, uc.opis, uc.urzadzenie_id, "
+            "u.nazwa as urz_nazwa, u.status, "
+            "ks.tryb, ks.opis as k_opis, ks.kategoria "
+            "FROM urzadzenia_kanaly uc JOIN urzadzenia u ON uc.urzadzenie_id=u.id "
+            "LEFT JOIN kanal_sterowanie ks "
+            "ON ks.urzadzenie_id=uc.urzadzenie_id AND ks.kanal=uc.kanal "
+            "WHERE u.gospodarstwo_id=? AND u.aktywne=1 "
+            "ORDER BY u.nazwa, uc.kanal", (g,)).fetchall()
         harm_cnt = {
             (h["urzadzenie_id"], h["kanal"]): h["n"]
             for h in db.execute(
                 "SELECT urzadzenie_id,kanal,COUNT(*) as n FROM harmonogramy "
-                "WHERE gospodarstwo_id=? AND aktywny=1 GROUP BY urzadzenie_id,kanal", (g,)).fetchall()
+                "WHERE gospodarstwo_id=? AND aktywny=1 "
+                "GROUP BY urzadzenie_id,kanal", (g,)).fetchall()
         }
+        supla_ok = bool(db.execute(
+            "SELECT 1 FROM ustawienia WHERE klucz='supla_access_token' "
+            "AND gospodarstwo_id=?", (g,)).fetchone())
         db.close()
-
-        kat_ico = {"swiatlo":"💡","brama":"🚪","grzanie":"🔥","wentylacja":"💨","pojenie":"💧","inne":"⚡","":"⚡"}
-        tryb_info = {t[0]: t for t in _TRYBY}
-
-        rows = ""
-        for k in kanaly:
-            tryb = k["tryb"] or "reczny"
-            ti   = tryb_info.get(tryb, _TRYBY[0])
-            opis = k["k_opis"] or k["opis"] or k["kanal"]
-            kat  = k["kategoria"] or ""
-            ico  = kat_ico.get(kat, "⚡")
-            on   = bool(k["stan"])
-            hn   = harm_cnt.get((k["urzadzenie_id"], k["kanal"]), 0)
-
-            rows += (
-                "<tr>"
-                "<td style='font-size:18px'>" + ico + "</td>"
-                "<td style='font-weight:500'>" + opis + "<br>"
-                "<span style='font-size:11px;color:#888'>" + k["urz_nazwa"] + " / " + k["kanal"] + "</span></td>"
-                "<td><span style='font-size:13px'>" + ti[3] + " " + ti[1] + "</span><br>"
-                "<span style='font-size:11px;color:#888'>" + ti[2][:40] + "</span></td>"
-                "<td><span class='badge " + ("b-green" if on else "b-gray") + "'>" + ("ON" if on else "OFF") + "</span>"
-                + (" <span style='font-size:11px;color:#534AB7'>⏰×" + str(hn) + "</span>" if hn else "")
-                + "</td>"
-                "<td class='nowrap'>"
-                "<button class='btn " + ("br" if on else "bg") + " bsm' onclick='tR(" + str(k["urzadzenie_id"]) + "," + repr(k["kanal"]) + "," + ("false" if on else "true") + ")'>"
-                + ("OFF" if on else "ON") + "</button> "
-                "<a href='/sterowanie/kanal/" + str(k["urzadzenie_id"]) + "/" + k["kanal"] + "' class='btn bo bsm'>⚙</a>"
-                "</td>"
-                "</tr>"
-            )
-
-        # Legenda trybów
-        legenda = "".join(
-            "<div style='padding:4px 0;font-size:13px'>"
-            "<span style='font-size:15px'>" + t[3] + "</span> "
-            "<b>" + t[1] + "</b> — <span style='color:#5f5e5a'>" + t[2] + "</span></div>"
-            for t in _TRYBY)
-
-        html = (
-            "<h1>Sterowanie</h1>"
-            "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
-            "<a href='/harmonogramy' class='btn bp bsm'>⏰ Harmonogramy</a>"
-            "<a href='/gpio' class='btn bo bsm'>Panel przekaźników</a>"
-            "<a href='/urzadzenia/dodaj' class='btn bo bsm'>+ Dodaj urządzenie</a>"
-            "</div>"
-            + ("<div class='card' style='overflow-x:auto'>"
-               "<table><thead><tr>"
-               "<th></th><th>Kanał</th><th>Tryb sterowania</th><th>Stan</th><th></th>"
-               "</tr></thead>"
-               "<tbody>" + rows + "</tbody></table>"
-               "<script>function tR(d,c,s){fetch('/sterowanie/cmd',{method:'POST',"
-               "headers:{'Content-Type':'application/json'},"
-               "body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})})"
-               ".then(r=>r.json()).then(()=>location.reload());}</script>"
-               "</div>"
-               if kanaly else
-               "<div class='card' style='text-align:center;padding:30px'>"
-               "<p style='color:#888'>Brak urządzeń slave.</p>"
-               "<a href='/urzadzenia/dodaj' class='btn bp bsm' style='margin-top:10px'>+ Dodaj ESP32 lub RPi slave</a>"
-               "</div>")
-            + "<details style='margin-top:12px'><summary style='cursor:pointer;color:#534AB7;font-size:13px'>Opis trybów sterowania</summary>"
-            + "<div class='card' style='margin-top:8px'>" + legenda + "</div></details>"
-        )
-        return R(html, "gpio")
+        return render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R)
 
     @app.route("/sterowanie/kanal/<int:did>/<kanal>", methods=["GET","POST"])
     @farm_required
