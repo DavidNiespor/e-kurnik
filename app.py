@@ -46,7 +46,7 @@ BASE = """<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f5f5f0;color:#2c2c2a;font-size:15px}
-nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-index:500}
+nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-index:1000}
 .nav-bar{display:flex;align-items:center;padding:0 12px;height:52px;gap:0}
 .logo{font-weight:700;font-size:15px;color:#534AB7;white-space:nowrap;text-decoration:none;margin-right:8px;flex-shrink:0}
 .farm-badge{background:#EEEDFE;color:#3C3489;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100px;flex-shrink:1;margin-right:4px}
@@ -56,7 +56,7 @@ nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-inde
 .nb-link.on{color:#2c2c2a;border-bottom-color:#534AB7}
 .arr{font-size:9px;opacity:.5;transition:transform .15s;pointer-events:none}
 .nb-item.open>.nb-link .arr{transform:rotate(180deg)}
-.nb-drop{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.12);min-width:190px;padding:4px;z-index:600}
+.nb-drop{display:none;position:absolute;top:52px;left:0;background:#fff;border:1px solid #e0ddd4;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:190px;padding:4px;z-index:1100}
 .nb-drop-right{right:0;left:auto}
 .nb-item.open>.nb-drop{display:block}
 .nb-drop a{display:block;padding:10px 14px;color:#2c2c2a;text-decoration:none;font-size:13px;border-radius:6px;white-space:nowrap;-webkit-tap-highlight-color:transparent}
@@ -64,7 +64,7 @@ nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-inde
 .nb-drop a.on{color:#534AB7;font-weight:500;background:#EEEDFE}
 .nb-sep{height:1px;background:#e0ddd4;margin:4px 2px}
 /* Nav layout */
-.nav-main{display:flex;align-items:center;flex:1;overflow:hidden}
+.nav-main{display:flex;align-items:center;flex:1;overflow:visible}
 .nav-spacer{flex:1}
 .nav-user{flex-shrink:0}
 /* Hamburger - mobile only */
@@ -88,7 +88,7 @@ nav{background:#fff;border-bottom:1px solid #e0ddd4;position:sticky;top:0;z-inde
 .dr-flat.on{color:#534AB7;font-weight:600}
 .dr-foot{padding:16px 18px;display:flex;align-items:center;justify-content:space-between;border-top:2px solid #e0ddd4;margin-top:4px}
 /* Layout */
-.wrap{max-width:980px;margin:0 auto;padding:14px}
+.wrap{max-width:980px;margin:0 auto;padding:14px;position:relative;z-index:1}
 h1{font-size:19px;font-weight:500;margin-bottom:14px}
 h2{font-size:14px;font-weight:500;margin:16px 0 8px;color:#444}
 .card{background:#fff;border:1px solid #e0ddd4;border-radius:12px;padding:14px;margin-bottom:12px}
