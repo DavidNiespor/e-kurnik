@@ -107,70 +107,7 @@ def register_produkcja(app):
 
     # ─── SPRZEDAŻ — historia transakcji ────────────────────────────────────
 
-    @app.route("/sprzedaz")
-    @farm_required
-    def sprzedaz_historia():
-        g = gid(); db = get_db()
-        rows = db.execute("""
-            SELECT p.data, p.jaja_sprzedane, p.cena_sprzedazy, p.typ_sprzedazy,
-                   p.uwagi, k.id as kid, k.nazwa as kn, p.zamowienie_id
-            FROM produkcja p
-            LEFT JOIN klienci k ON p.klient_id=k.id
-            WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane > 0
-            ORDER BY p.data DESC LIMIT 120""", (g,)).fetchall()
-
-        # Suma miesiąc
-        stat = db.execute("""
-            SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,
-                   COALESCE(SUM(jaja_sprzedane*cena_sprzedazy),0) as kwota
-            FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')
-            AND jaja_sprzedane > 0""", (g,)).fetchone()
-        db.close()
-
-        TYP = {"gotowka": "💵 Gotówka", "przelew": "🏦 Przelew",
-               "z_salda": "📋 Z salda", "nastepnym_razem": "⏳ Następnym razem", "": ""}
-
-        rows_html = ""
-        for r in rows:
-            przych = round((r["jaja_sprzedane"] or 0) * (r["cena_sprzedazy"] or 0), 2)
-            typ_s  = TYP.get(r["typ_sprzedazy"] or "", r["typ_sprzedazy"] or "—")
-            klink  = (f"<a href='/klienci/{r['kid']}' style='color:#534AB7'>{r['kn']}</a>"
-                      if r["kid"] else "—")
-            rows_html += (
-                f"<tr>"
-                f"<td style='white-space:nowrap;font-size:13px'>{r['data']}</td>"
-                f"<td style='font-weight:600;text-align:center'>{r['jaja_sprzedane']}</td>"
-                f"<td style='text-align:right'>{r['cena_sprzedazy'] or '—'} zł</td>"
-                f"<td style='font-weight:600;color:#3B6D11;text-align:right'>{przych} zł</td>"
-                f"<td>{klink}</td>"
-                f"<td style='font-size:12px;color:#888'>{typ_s}</td>"
-                f"<td style='font-size:11px;color:#888'>{r['uwagi'] or ''}</td>"
-                f"<td><a href='/produkcja/edytuj/{r['data']}' class='btn bo bsm'>Edytuj</a></td>"
-                f"</tr>"
-            )
-
-        html = (
-            "<h1>Historia sprzedaży</h1>"
-            "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
-            "<a href='/produkcja' class='btn bo bsm'>← Produkcja</a>"
-            "<a href='/klienci' class='btn bo bsm'>Klienci i salda →</a>"
-            "</div>"
-            f"<div class='g2' style='margin-bottom:12px'>"
-            f"<div class='card stat'><div class='v'>{int(stat['szt'])} szt</div><div class='l'>Sprzedano w miesiącu</div></div>"
-            f"<div class='card stat'><div class='v' style='color:#3B6D11'>{round(stat['kwota'],2)} zł</div><div class='l'>Przychód miesiąc</div></div>"
-            f"</div>"
-            "<div class='card' style='overflow-x:auto'>"
-            "<table><thead><tr>"
-            "<th>Data</th><th style='text-align:center'>Szt</th>"
-            "<th style='text-align:right'>Cena/szt</th><th style='text-align:right'>Przychód</th>"
-            "<th>Klient</th><th>Płatność</th><th>Uwagi</th><th></th>"
-            "</tr></thead>"
-            f"<tbody>{rows_html or '<tr><td colspan=8 style=\"color:#888;text-align:center;padding:20px\">Brak sprzedaży</td></tr>'}</tbody>"
-            "</table></div>"
-        )
-        return R(html, "prod")
-
-    # ─── KLIENCI — lista z saldami ─────────────────────────────────────────
+    # sprzedaz przeniesiona do sprzedaz_views.py
 
     @app.route("/klienci")
     @farm_required

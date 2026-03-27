@@ -29,6 +29,7 @@ try:
 except ImportError:
     register_supla_oauth_routes = None
 from produkcja_views import register_produkcja
+from sprzedaz_views import register_sprzedaz
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -2098,6 +2099,7 @@ register_routes(app)
 if register_supla_oauth_routes:
     register_supla_oauth_routes(app)
 register_produkcja(app)
+register_sprzedaz(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
