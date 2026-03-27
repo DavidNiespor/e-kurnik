@@ -1362,77 +1362,316 @@ def pasza_mieszaj():
 @app.route("/pasza/receptury")
 @farm_required
 def pasza_receptury():
-    g = gid()
-    db = get_db()
-    recs = db.execute("SELECT * FROM receptura WHERE gospodarstwo_id=? ORDER BY aktywna DESC, nazwa", (g,)).fetchall()
+    g = gid(); db = get_db()
+    recs = db.execute(
+        "SELECT r.*, COUNT(rs.id) as n_skl, ROUND(SUM(rs.procent)*100,1) as suma_pct "
+        "FROM receptura r LEFT JOIN receptura_skladnik rs ON rs.receptura_id=r.id "
+        "WHERE r.gospodarstwo_id=? GROUP BY r.id ORDER BY r.aktywna DESC, r.nazwa", (g,)).fetchall()
     db.close()
-    w = "".join(
-        '<tr><td>' + r["nazwa"] + '</td><td>' + r["sezon"] + '</td>'
-        '<td>' + ('<span class="badge b-green">aktywna</span>' if r["aktywna"] else "") + '</td>'
-        '<td>'
-        '<a href="/pasza/receptura/' + str(r["id"]) + '/aktywuj" class="btn bg bsm">Aktywuj</a>'
-        '</td></tr>'
-        for r in recs
-    )
+    SEZON = {"caly_rok":"Cały rok","lato":"Lato","zima":"Zima","wiosna":"Wiosna","jesien":"Jesień"}
+    cards = ""
+    for r in recs:
+        sezon = SEZON.get(r["sezon"] or "caly_rok", "Cały rok")
+        sp = r["suma_pct"] or 0
+        pc = "#3B6D11" if 98<=sp<=102 else "#A32D2D"
+        rid2 = r["id"]
+        cards += (
+            "<div class='card' style='margin-bottom:10px;border-left:4px solid "
+            + ("#3B6D11" if r["aktywna"] else "#e0ddd4") + "'>"
+            "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
+            "<div style='flex:1'>"
+            "<div style='display:flex;align-items:center;gap:8px'>"
+            "<b style='font-size:16px'>" + r["nazwa"] + "</b>"
+            + (" <span class='badge b-green'>✓ Aktywna</span>" if r["aktywna"] else "") + "</div>"
+            "<div style='font-size:12px;color:#888;margin-top:3px'>"
+            + sezon + " · " + str(r["n_skl"]) + " składn. · "
+            "<span style='color:" + pc + ";font-weight:500'>suma: " + str(sp) + "%</span>"
+            + "</div></div>"
+            "<div style='display:flex;gap:6px;flex-wrap:wrap'>"
+            "<a href='/pasza/receptura/" + str(rid2) + "/podglad' class='btn bo bsm'>👁 Podgląd</a>"
+            "<a href='/pasza/receptura/" + str(rid2) + "/edytuj' class='btn bo bsm'>✏️ Edytuj</a>"
+            + ("" if r["aktywna"] else "<a href='/pasza/receptura/" + str(rid2) + "/aktywuj' class='btn bg bsm'>Aktywuj</a>")
+            + "<a href='/pasza/receptura/" + str(rid2) + "/duplikuj' class='btn bo bsm'>Duplikuj</a>"
+            + "<a href='/pasza/receptura/" + str(rid2) + "/usun' class='btn br bsm' onclick=\"return confirm('Usunąć?')\">✕</a>"
+            + "</div></div></div>"
+        )
     html = (
-        '<h1>Receptury paszy</h1>'
-        '<a href="/pasza/receptura/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Nowa receptura</a>'
-        '<div class="card"><table><thead><tr><th>Nazwa</th><th>Sezon</th><th>Status</th><th></th></tr></thead>'
-        '<tbody>' + (w or '<tr><td colspan=4 style="color:#888;text-align:center;padding:16px">Brak receptur</td></tr>') + '</tbody></table></div>'
+        "<h1>Receptury paszy</h1>"
+        "<div style='display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap'>"
+        "<a href='/pasza/receptura/dodaj' class='btn bp bsm'>+ Nowa receptura</a>"
+        "<a href='/pasza/analityka' class='btn bo bsm'>Analityka</a>"
+        "<a href='/pasza/skladniki-roczne' class='btn bo bsm'>Zapotrzebowanie roczne</a>"
+        "</div>"
+        + (cards or "<div class='card'><p style='color:#888;text-align:center;padding:20px'>Brak receptur.</p></div>")
     )
     return R(html, "pasza")
 
-@app.route("/pasza/receptura/dodaj", methods=["GET","POST"])
+
+@app.route("/pasza/receptura/<int:rid>/podglad")
 @farm_required
-def pasza_receptura_dodaj():
-    g = gid()
-    if request.method == "POST":
-        db = get_db()
-        rid = db.execute("INSERT INTO receptura(gospodarstwo_id,nazwa,sezon,aktywna) VALUES(?,?,?,0)",
-            (g, request.form["nazwa"], request.form.get("sezon","caly_rok"))).lastrowid
-        for mid_v, proc_v in zip(request.form.getlist("mag_id"), request.form.getlist("procent")):
-            if mid_v and proc_v:
-                db.execute("INSERT INTO receptura_skladnik(receptura_id,magazyn_id,procent) VALUES(?,?,?)",
-                    (rid, int(mid_v), float(proc_v)))
-        db.commit(); db.close()
-        flash("Receptura dodana.")
-        return redirect("/pasza/receptury")
-    db = get_db()
-    skladniki = db.execute("SELECT id,nazwa,jednostka FROM stan_magazynu WHERE gospodarstwo_id=? AND kategoria IN ('Zboże/pasza','Witaminy/suplementy') ORDER BY nazwa", (g,)).fetchall()
+def pasza_receptura_podglad(rid):
+    g = gid(); db = get_db()
+    r = db.execute("SELECT * FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid,g)).fetchone()
+    if not r: db.close(); return redirect("/pasza/receptury")
+    sklady = db.execute(
+        "SELECT rs.procent, sm.nazwa, sm.stan, "
+        "COALESCE(sb.bialko_pct,0) as bialko, COALESCE(sb.cena_pln_t,0) as cena_t "
+        "FROM receptura_skladnik rs JOIN stan_magazynu sm ON rs.magazyn_id=sm.id "
+        "LEFT JOIN skladniki_baza sb ON LOWER(TRIM(sb.nazwa))=LOWER(TRIM(sm.nazwa)) "
+        "WHERE rs.receptura_id=? ORDER BY rs.procent DESC", (rid,)).fetchall()
+    mies = db.execute(
+        "SELECT data,ilosc_kg FROM mieszania WHERE receptura_id=? AND gospodarstwo_id=? "
+        "ORDER BY data DESC LIMIT 5", (rid,g)).fetchall()
     db.close()
-    opt = "".join('<option value="' + str(s["id"]) + '">' + s["nazwa"] + '</option>' for s in skladniki)
-    wiersze = "".join(
-        '<tr><td><select name="mag_id" style="width:100%"><option value="">— wybierz —</option>' + opt + '</select></td>'
-        '<td><input name="procent" type="number" step="0.5" min="0" max="100" placeholder="%" style="width:80px"></td></tr>'
-        for _ in range(8)
-    )
+    suma = sum(float(s["procent"] or 0) for s in sklady)
+    koszt_t = sum(float(s["cena_t"] or 0)*float(s["procent"] or 0) for s in sklady)
+    SEZON = {"caly_rok":"Cały rok","lato":"Lato","zima":"Zima","wiosna":"Wiosna","jesien":"Jesień"}
+    sc = "#3B6D11" if 0.98<=suma<=1.02 else "#A32D2D"
+    rows = ""
+    for s in sklady:
+        p = float(s["procent"] or 0)
+        bw = min(100, round(p*100, 0))
+        rows += (
+            "<tr>"
+            "<td><b>" + s["nazwa"] + "</b><br>"
+            "<div style='width:120px;background:#e0ddd4;border-radius:3px;height:6px;margin-top:3px'>"
+            "<div style='width:" + str(int(bw)) + "%;background:#534AB7;height:100%;border-radius:3px'></div></div></td>"
+            "<td style='text-align:right;font-weight:700;font-size:15px'>" + str(round(p*100,1)) + "%</td>"
+            "<td style='text-align:right'>" + str(round(50*p,2)) + " kg</td>"
+            "<td style='text-align:right'>" + str(round(100*p,2)) + " kg</td>"
+            "<td style='text-align:right;color:#888'>" + str(round(float(s["stan"] or 0),1)) + " kg</td>"
+            "<td style='text-align:right;font-size:12px'>"
+            + (str(round(s["bialko"]*p,2)) + "%" if s["bialko"] else "—") + "</td></tr>"
+        )
+    mies_html = "".join(
+        "<div style='display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"
+        "border-bottom:1px solid #f0ede4'><span style='color:#888'>" + m["data"][:10]
+        + "</span><b>" + str(round(m["ilosc_kg"],1)) + " kg</b></div>"
+        for m in mies)
+    import json as _j
+    skl_js = _j.dumps([{"n":s["nazwa"],"p":float(s["procent"] or 0)} for s in sklady])
     html = (
-        '<h1>Nowa receptura</h1><div class="card"><form method="POST">'
-        '<div class="g2">'
-        '<div><label>Nazwa</label><input name="nazwa" required></div>'
-        '<div><label>Sezon</label><select name="sezon">'
-        '<option value="caly_rok">Cały rok</option><option value="lato">Lato</option>'
-        '<option value="zima">Zima</option>'
-        '</select></div>'
-        '</div>'
-        '<h2>Składniki (suma = 100%)</h2>'
-        '<table><thead><tr><th>Składnik</th><th>%</th></tr></thead><tbody>' + wiersze + '</tbody></table>'
-        '<br><button class="btn bp">Zapisz</button>'
-        '<a href="/pasza/receptury" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
+        "<div style='display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap'>"
+        "<h1 style='margin-bottom:0'>" + r["nazwa"] + "</h1>"
+        + (" <span class='badge b-green'>✓ Aktywna</span>" if r["aktywna"] else "")
+        + "<div style='margin-left:auto;display:flex;gap:6px;flex-wrap:wrap'>"
+        "<a href='/pasza/receptura/" + str(rid) + "/edytuj' class='btn bp bsm'>✏️ Edytuj</a>"
+        "<a href='/pasza/receptura/" + str(rid) + "/aktywuj' class='btn bg bsm'>Aktywuj</a>"
+        "<a href='/pasza/mieszalnik?rid=" + str(rid) + "' class='btn bo bsm'>⚗️ Mieszaj</a>"
+        "<a href='/pasza/receptury' class='btn bo bsm'>← Lista</a>"
+        "</div></div>"
+        "<div class='g2'>"
+        "<div>"
+        "<div class='card'>"
+        "<div style='display:flex;justify-content:space-between;margin-bottom:10px'>"
+        "<b>Składniki receptury</b>"
+        "<span style='color:" + sc + ";font-weight:600'>suma: " + str(round(suma*100,1)) + "%</span></div>"
+        "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
+        "<th>Składnik</th><th style='text-align:right'>Udział</th>"
+        "<th style='text-align:right'>na 50 kg</th><th style='text-align:right'>na 100 kg</th>"
+        "<th style='text-align:right'>Magazyn</th><th style='text-align:right'>Białko wkł.</th>"
+        "</tr></thead><tbody>" + rows + "</tbody>"
+        "<tfoot><tr style='border-top:2px solid #e0ddd4;font-weight:700'>"
+        "<td>SUMA</td>"
+        "<td style='text-align:right;color:" + sc + "'>" + str(round(suma*100,1)) + "%</td>"
+        "<td style='text-align:right'>" + str(round(50*suma,1)) + " kg</td>"
+        "<td style='text-align:right'>" + str(round(100*suma,1)) + " kg</td>"
+        "<td colspan=2></td></tr></tfoot></table></div></div>"
+        "<div class='card' style='margin-top:0'>"
+        "<b>Kalkulator partii</b>"
+        "<label style='margin-top:10px'>Ile kg chcę zmieszać?</label>"
+        "<input type='number' id='ckg' value='50' step='5' min='5' oninput='cP(this.value)' style='font-size:22px;text-align:center'>"
+        "<div id='cr' style='margin-top:10px;font-size:13px'></div>"
+        "<a href='/pasza/mieszalnik?rid=" + str(rid) + "' class='btn bg bsm' style='margin-top:10px;display:block;text-align:center'>⚗️ Otwórz mieszalnik</a>"
+        "</div></div>"
+        "<div>"
+        "<div class='card'><b>Informacje</b><div style='margin-top:8px;font-size:13px'>"
+        "<div style='padding:4px 0;border-bottom:1px solid #f0ede4'><span style='color:#888'>Sezon:</span> <b>"
+        + SEZON.get(r["sezon"] or "caly_rok","Cały rok") + "</b></div>"
+        "<div style='padding:4px 0;border-bottom:1px solid #f0ede4'><span style='color:#888'>Składniki:</span> <b>"
+        + str(len(sklady)) + "</b></div>"
+        "<div style='padding:4px 0;border-bottom:1px solid #f0ede4'><span style='color:#888'>Koszt PLN/T:</span> <b>"
+        + str(round(koszt_t,0)) + "</b></div>"
+        "<div style='padding:4px 0'><span style='color:#888'>Koszt 100 kg:</span> <b>"
+        + str(round(koszt_t/10,0)) + " PLN</b></div></div>"
+        "<a href='/pasza/receptura/" + str(rid) + "/sezon-form' class='btn bo bsm' style='margin-top:10px'>Zmień sezon</a>"
+        "</div>"
+        + ("<div class='card' style='margin-top:0'><b>Ostatnie mieszania</b><div style='margin-top:8px'>" + mies_html + "</div></div>" if mies else "")
+        + "<div class='card' style='margin-top:0'><b>Analityka odżywcza</b>"
+        "<p style='font-size:12px;color:#888;margin:6px 0'>Białko, Ca, energia vs normy.</p>"
+        "<a href='/pasza/analityka?rid=" + str(rid) + "' class='btn bp bsm'>Otwórz →</a></div>"
+        "</div></div>"
+        "<script>var _sk=" + skl_js + ";"
+        "function cP(kg){kg=parseFloat(kg)||0;"
+        "var h='';_sk.forEach(function(s){h+='<tr><td>'+s.n+'</td><td style=\"text-align:right;font-weight:600\">'+(Math.round(kg*s.p*100)/100)+' kg</td></tr>';});"
+        "document.getElementById('cr').innerHTML='<table style=\"width:100%;font-size:12px\">'+h+'</table>';}"
+        "cP(50);</script>"
     )
     return R(html, "pasza")
+
+
+@app.route("/pasza/receptura/dodaj", methods=["GET","POST"])
+@app.route("/pasza/receptura/<int:rid>/edytuj", methods=["GET","POST"])
+@farm_required
+def pasza_receptura_form(rid=None):
+    g = gid(); db = get_db()
+    mag_skl = db.execute("SELECT id,nazwa,stan FROM stan_magazynu WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    if request.method == "POST":
+        nazwa = request.form.get("nazwa","").strip()
+        sezon = request.form.get("sezon","caly_rok")
+        if not nazwa:
+            flash("Podaj nazwę receptury."); db.close(); return redirect(request.url)
+        if rid:
+            db.execute("UPDATE receptura SET nazwa=?,sezon=? WHERE id=? AND gospodarstwo_id=?", (nazwa,sezon,rid,g))
+            db.execute("DELETE FROM receptura_skladnik WHERE receptura_id=?", (rid,))
+        else:
+            rid = db.execute("INSERT INTO receptura(gospodarstwo_id,nazwa,sezon,aktywna) VALUES(?,?,?,0)", (g,nazwa,sezon)).lastrowid
+        mag_ids  = request.form.getlist("mag_id")
+        procenty = request.form.getlist("procent")
+        nowe_n   = request.form.getlist("nowa_nazwa") + [""]*len(mag_ids)
+        for mv, pv, nn in zip(mag_ids, procenty, nowe_n):
+            pct = float(pv or 0)
+            if pct <= 0: continue
+            if mv:
+                db.execute("INSERT INTO receptura_skladnik(receptura_id,magazyn_id,procent) VALUES(?,?,?)", (rid,int(mv),pct))
+            elif nn.strip():
+                ex = db.execute("SELECT id FROM stan_magazynu WHERE gospodarstwo_id=? AND LOWER(nazwa)=LOWER(?)", (g,nn.strip())).fetchone()
+                mid2 = ex["id"] if ex else db.execute("INSERT INTO stan_magazynu(gospodarstwo_id,kategoria,nazwa,jednostka,stan) VALUES(?,?,?,?,0)", (g,"Zboże/pasza",nn.strip(),"kg")).lastrowid
+                db.execute("INSERT INTO receptura_skladnik(receptura_id,magazyn_id,procent) VALUES(?,?,?)", (rid,mid2,pct))
+        db.commit(); db.close()
+        flash("Receptura zapisana.")
+        return redirect("/pasza/receptura/"+str(rid)+"/podglad")
+    rec = None; existing = []
+    if rid:
+        rec = db.execute("SELECT * FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid,g)).fetchone()
+        if not rec: db.close(); return redirect("/pasza/receptury")
+        existing = db.execute(
+            "SELECT rs.procent,rs.magazyn_id,sm.nazwa FROM receptura_skladnik rs "
+            "JOIN stan_magazynu sm ON rs.magazyn_id=sm.id WHERE rs.receptura_id=? ORDER BY rs.procent DESC", (rid,)).fetchall()
+    db.close()
+    SEZONY = [("caly_rok","🗓 Cały rok"),("wiosna","🌱 Wiosna"),("lato","☀️ Lato"),("jesien","🍂 Jesień"),("zima","❄️ Zima")]
+    sc = (rec["sezon"] if rec else "caly_rok") or "caly_rok"
+    sezon_opts = "".join("<option value='"+v+"' "+("selected" if sc==v else "")+">"+l+"</option>" for v,l in SEZONY)
+    def _row(mag_id="", proc=0):
+        p100 = round(float(proc)*100, 1) if proc else 0
+        bw = min(100, round(float(proc or 0)*100, 0))
+        opts = "".join("<option value='"+str(s["id"])+"' "+("selected" if str(s["id"])==str(mag_id) else "")+">"+s["nazwa"]+"</option>" for s in mag_skl)
+        return (
+            "<tr class='sr'>"
+            "<td style='padding:4px'>"
+            "<select name='mag_id' style='width:100%;margin-bottom:4px'><option value=''>— wybierz —</option>"+opts+"</select>"
+            "<input name='nowa_nazwa' placeholder='lub wpisz ręcznie' style='width:100%;font-size:12px;color:#888'>"
+            "</td>"
+            "<td style='padding:4px'>"
+            "<div style='display:flex;align-items:center;gap:6px'>"
+            "<input name='procent' type='number' step='0.001' min='0' max='1' value='"+str(proc)+"' oninput='upd()' style='width:90px;text-align:right;font-size:16px'>"
+            "<span style='font-size:13px;color:#888'>= <span class='pd'>"+str(p100)+"</span>%</span>"
+            "</div></td>"
+            "<td style='padding:4px;width:90px'>"
+            "<div style='background:#e0ddd4;border-radius:4px;height:10px;width:80px'>"
+            "<div class='pb' style='width:"+str(int(bw))+"%;background:#534AB7;height:100%;border-radius:4px'></div></div>"
+            "</td>"
+            "<td style='padding:4px'><button type='button' onclick=\"this.closest('tr').remove();upd()\" class='btn br bsm'>✕</button></td>"
+            "</tr>"
+        )
+    rows_html = "".join(_row(s["magazyn_id"], s["procent"]) for s in existing)
+    for _ in range(max(3, 5-len(existing))): rows_html += _row()
+    # Pusty wiersz do addRow - zbuduj opcje
+    empty_opts = "".join("<option value='"+str(s["id"])+"'>"+s["nazwa"]+"</option>" for s in mag_skl)
+    html = (
+        "<h1>"+("Edytuj: "+rec["nazwa"] if rec else "Nowa receptura")+"</h1>"
+        "<div class='card'><form method='POST'>"
+        "<div class='g2'>"
+        "<div><label>Nazwa receptury</label>"
+        "<input name='nazwa' required value='"+((rec["nazwa"] if rec else "") or "")+"' style='font-size:16px'></div>"
+        "<div><label>Sezon stosowania</label><select name='sezon'>"+sezon_opts+"</select></div>"
+        "</div>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px'>"
+        "<h2 style='margin:0'>Składniki receptury</h2>"
+        "<div style='display:flex;align-items:center;gap:10px'>"
+        "Suma: <b id='sv' style='font-size:20px;color:#888'>0%</b>"
+        "<button type='button' onclick='addR()' class='btn bo bsm'>+ Dodaj wiersz</button>"
+        "</div></div>"
+        "<div style='background:#EEEDFE;border-radius:8px;padding:8px 12px;font-size:12px;color:#3C3489;margin-bottom:8px'>"
+        "Podaj udział jako ułamek dziesiętny: <b>0.55</b> = 55%, <b>0.09</b> = 9%, <b>0.005</b> = 0.5%</div>"
+        "<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse'>"
+        "<thead><tr><th>Składnik</th><th>Udział (0–1)</th><th>Udział %</th><th></th></tr></thead>"
+        "<tbody id='sb'>"+rows_html+"</tbody></table></div>"
+        "<div style='margin-top:12px;padding:12px;background:#f5f5f0;border-radius:8px;font-size:15px'>"
+        "Suma: <b id='sbig' style='font-size:22px'>0</b>% <span id='si' style='font-size:13px'></span></div>"
+        "<br><button class='btn bp' style='width:100%;padding:14px;font-size:16px'>💾 Zapisz recepturę</button>"
+        "<a href='"+("/pasza/receptura/"+str(rid)+"/podglad" if rid else "/pasza/receptury")+"' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+        "</form></div>"
+        "<script>"
+        "function upd(){"
+        "  var ii=document.querySelectorAll('#sb [name=procent]'),s=0;"
+        "  ii.forEach(function(i){var v=parseFloat(i.value)||0;s+=v;"
+        "    var t=i.closest('tr');"
+        "    var pd=t.querySelector('.pd');if(pd)pd.textContent=Math.round(v*1000)/10;"
+        "    var pb=t.querySelector('.pb');if(pb)pb.style.width=Math.min(100,v*100)+'%';});"
+        "  var p=Math.round(s*1000)/10;"
+        "  var sv=document.getElementById('sv');sv.textContent=p+'%';sv.style.color=p>=98&&p<=102?'#3B6D11':'#A32D2D';"
+        "  document.getElementById('sbig').textContent=p;"
+        "  var si=document.getElementById('si');"
+        "  si.textContent=p<98||p>102?'⚠ powinna wynosić 100%':'✓ OK';"
+        "  si.style.color=p<98||p>102?'#A32D2D':'#3B6D11';}"
+        "function addR(){"
+        "  var tr=document.createElement('tr');tr.className='sr';"
+        "  var oo='<option value=\"\">— wybierz —</option>"
+        + empty_opts.replace("'", "\\'") +
+        "';"
+        "  tr.innerHTML='<td style=\"padding:4px\"><select name=\"mag_id\" style=\"width:100%;margin-bottom:4px\">'+oo+'</select>"
+        "<input name=\"nowa_nazwa\" placeholder=\"lub wpisz ręcznie\" style=\"width:100%;font-size:12px;color:#888\"></td>"
+        "<td style=\"padding:4px\"><div style=\"display:flex;align-items:center;gap:6px\">"
+        "<input name=\"procent\" type=\"number\" step=\"0.001\" min=\"0\" max=\"1\" oninput=\"upd()\" style=\"width:90px;text-align:right;font-size:16px\">"
+        "<span style=\"font-size:13px;color:#888\">= <span class=\"pd\">0</span>%</span></div></td>"
+        "<td style=\"padding:4px\"><div style=\"background:#e0ddd4;border-radius:4px;height:10px;width:80px\">"
+        "<div class=\"pb\" style=\"width:0%;background:#534AB7;height:100%;border-radius:4px\"></div></div></td>"
+        "<td style=\"padding:4px\"><button type=\"button\" onclick=\"this.closest(' + \"'tr'\" + ').remove();upd()\" class=\"btn br bsm\">✕</button></td>';"
+        "  document.getElementById('sb').appendChild(tr);}"
+        "upd();</script>"
+    )
+    return R(html, "pasza")
+
 
 @app.route("/pasza/receptura/<int:rid>/aktywuj")
 @farm_required
 def pasza_receptura_aktywuj(rid):
-    g = gid()
-    db = get_db()
+    g = gid(); db = get_db()
     db.execute("UPDATE receptura SET aktywna=0 WHERE gospodarstwo_id=?", (g,))
     db.execute("UPDATE receptura SET aktywna=1 WHERE id=? AND gospodarstwo_id=?", (rid,g))
-    db.commit(); db.close()
-    flash("Receptura aktywowana.")
+    db.commit(); db.close(); flash("Receptura aktywowana.")
     return redirect("/pasza/receptury")
+
+
+@app.route("/pasza/receptura/<int:rid>/duplikuj")
+@farm_required
+def pasza_receptura_duplikuj(rid):
+    g = gid(); db = get_db()
+    r = db.execute("SELECT * FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid,g)).fetchone()
+    if not r: db.close(); return redirect("/pasza/receptury")
+    nid = db.execute("INSERT INTO receptura(gospodarstwo_id,nazwa,sezon,aktywna) VALUES(?,?,?,0)",
+                     (g, r["nazwa"]+" (kopia)", r["sezon"])).lastrowid
+    for s in db.execute("SELECT * FROM receptura_skladnik WHERE receptura_id=?", (rid,)).fetchall():
+        db.execute("INSERT INTO receptura_skladnik(receptura_id,magazyn_id,procent) VALUES(?,?,?)", (nid,s["magazyn_id"],s["procent"]))
+    db.commit(); db.close(); flash("Receptura zduplikowana.")
+    return redirect("/pasza/receptura/"+str(nid)+"/edytuj")
+
+
+@app.route("/pasza/receptura/<int:rid>/usun")
+@farm_required
+def pasza_receptura_usun(rid):
+    g = gid(); db = get_db()
+    r = db.execute("SELECT aktywna FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid,g)).fetchone()
+    if r and r["aktywna"]:
+        flash("Nie można usunąć aktywnej receptury."); db.close(); return redirect("/pasza/receptury")
+    db.execute("DELETE FROM receptura WHERE id=? AND gospodarstwo_id=?", (rid,g))
+    db.commit(); db.close(); flash("Receptura usunięta.")
+    return redirect("/pasza/receptury")
+
+
+
+
 
 # ─── URZĄDZENIA ───────────────────────────────────────────────────────────────
 @app.route("/urzadzenia")
