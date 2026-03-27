@@ -417,6 +417,18 @@ def register_routes(app):
                            (g,d,jaja,sprzed,cena,pasza,kid,zid,typ,uwagi))
             if zid and sprzed > 0:
                 db.execute("UPDATE zamowienia SET status='dostarczone' WHERE id=? AND gospodarstwo_id=?", (zid,g))
+            # Aktualizuj saldo klienta jeśli sprzedaż "nastepnym_razem"
+            if kid and sprzed > 0 and typ == "nastepnym_razem":
+                kwota = round(sprzed * cena, 2)
+                ks = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+                stare = float(ks["saldo_pln"] if ks else 0)
+                nowe = round(stare + kwota, 2)
+                if ks:
+                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe, kid))
+                else:
+                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe))
+                db.execute("INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
+                           (g, kid, "sprzedaz", kwota, f"Sprzedaż {sprzed} szt. × {cena} zł", nowe))
             db.commit(); db.close(); flash("Zapisano."); return redirect("/")
         db=get_db()
         d_p=request.args.get("data",date.today().isoformat())

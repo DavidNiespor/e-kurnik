@@ -28,6 +28,7 @@ try:
     from supla_oauth import register_supla_oauth_routes
 except ImportError:
     register_supla_oauth_routes = None
+from produkcja_views import register_produkcja
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -158,8 +159,10 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
     <div class="nb-item">
       <span class="nb-link {{ 'on' if p in ['zam','mag'] }}">Sprzeda&#380; <span class="arr">&#9660;</span></span>
       <div class="nb-drop">
+        <a href="/sprzedaz" class="{{ 'on' if p=='sprzedaz' }}">Historia sprzeda&#380;y</a>
+        <a href="/klienci" class="{{ 'on' if p=='klienci' }}">Klienci i salda</a>
+        <div class="nb-sep"></div>
         <a href="/zamowienia" class="{{ 'on' if p=='zam' }}">Zam&#243;wienia</a>
-        <a href="/klienci">Klienci</a>
         <a href="/magazyn" class="{{ 'on' if p=='mag' }}">Magazyn jaj</a>
       </div>
     </div>
@@ -236,8 +239,9 @@ code{background:#f0ede4;padding:2px 6px;border-radius:4px;font-size:12px}
   <div class="dr-section" id="drs-spr">
     <div class="dr-head" onclick="toggleSec('drs-spr')"><span>&#x1F6D2; Sprzeda&#380;</span><span class="dr-arr">&#9660;</span></div>
     <div class="dr-body">
+      <a href="/sprzedaz" onclick="closeDrawer()">Historia sprzeda&#380;y</a>
+      <a href="/klienci" onclick="closeDrawer()">Klienci i salda</a>
       <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="closeDrawer()">Zam&#243;wienia</a>
-      <a href="/klienci" onclick="closeDrawer()">Klienci</a>
       <a href="/magazyn" class="{{ 'on' if p=='mag' }}" onclick="closeDrawer()">Magazyn jaj</a>
     </div>
   </div>
@@ -789,117 +793,7 @@ def dashboard():
 
 
 # ─── PRODUKCJA ────────────────────────────────────────────────────────────────
-@app.route("/produkcja")
-@farm_required
-def produkcja():
-    g = gid(); db = get_db()
-    rows = db.execute("""SELECT p.*,k.nazwa as kn FROM produkcja p
-        LEFT JOIN klienci k ON p.klient_id=k.id
-        WHERE p.gospodarstwo_id=? ORDER BY p.data DESC LIMIT 90""", (g,)).fetchall()
-    kur  = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 1
-    db.close()
-
-    w = ""
-    for r in rows:
-        niesn = round(r["jaja_zebrane"]/kur*100,1) if kur else 0
-        przych = round(r["jaja_sprzedane"]*(r["cena_sprzedazy"] or 0), 2)
-        kol_n = "#A32D2D" if niesn < 60 else "#BA7517" if niesn < 80 else "#3B6D11"
-        w += (
-            "<tr>"
-            "<td style='white-space:nowrap'>" + r["data"] + "</td>"
-            "<td style='font-weight:600;font-size:16px;text-align:center'>" + str(r["jaja_zebrane"]) + "</td>"
-            "<td style='color:" + kol_n + ";font-weight:500;text-align:center'>" + str(niesn) + "%</td>"
-            "<td style='text-align:center'>" + str(r["jaja_sprzedane"]) + "</td>"
-            "<td style='color:#888;font-size:12px'>" + (r["kn"] or "—") + "</td>"
-            "<td style='font-weight:500;color:#3B6D11'>" + str(przych) + " zł</td>"
-            "<td style='color:#888;font-size:11px'>" + (r["uwagi"] or "") + "</td>"
-            "<td class='nowrap'>"
-            "<a href='/produkcja/edytuj/" + r["data"] + "' class='btn bo bsm'>Edytuj</a>"
-            "</td></tr>"
-        )
-
-    html = (
-        "<h1>Produkcja jaj</h1>"
-        "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
-        "<a href='/produkcja/dodaj-pelny' class='btn bp bsm'>+ Sprzedaż z klientem</a>"
-        "</div>"
-        "<div class='card' style='overflow-x:auto'>"
-        "<table><thead><tr>"
-        "<th>Data</th><th style='text-align:center'>Zebrane</th><th style='text-align:center'>Nieśność</th>"
-        "<th style='text-align:center'>Sprzedane</th><th>Klient</th><th>Przychód</th><th>Uwagi</th><th></th>"
-        "</tr></thead>"
-        "<tbody>" + (w or "<tr><td colspan=8 style='color:#888;text-align:center;padding:20px'>Brak wpisów</td></tr>") + "</tbody>"
-        "</table></div>"
-    )
-    return R(html, "prod")
-
-
-@app.route("/produkcja/edytuj/<data>", methods=["GET","POST"])
-@farm_required
-def produkcja_edytuj(data):
-    """Edycja / korekta wpisu z danego dnia — np. po stłuczeniu jaj."""
-    g = gid(); db = get_db()
-    r = db.execute("SELECT p.*,k.nazwa as kn FROM produkcja p LEFT JOIN klienci k ON p.klient_id=k.id WHERE p.gospodarstwo_id=? AND p.data=?", (g, data)).fetchone()
-    if not r: db.close(); flash("Nie znaleziono wpisu."); return redirect("/produkcja")
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
-    zamow = db.execute("SELECT z.id,z.data_dostawy,z.ilosc,k.nazwa as kn FROM zamowienia z LEFT JOIN klienci k ON z.klient_id=k.id WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone') ORDER BY z.data_dostawy", (g,)).fetchall()
-
-    if request.method == "POST":
-        jaja    = int(request.form.get("jaja_zebrane", r["jaja_zebrane"]) or 0)
-        sprzed  = int(request.form.get("jaja_sprzedane", r["jaja_sprzedane"]) or 0)
-        cena    = float(request.form.get("cena_sprzedazy", r["cena_sprzedazy"] or 0) or 0)
-        uwagi   = request.form.get("uwagi","")
-        kid     = request.form.get("klient_id") or None
-        zid     = request.form.get("zamowienie_id") or None
-        typ     = request.form.get("typ_sprzedazy","gotowka")
-        db.execute("UPDATE produkcja SET jaja_zebrane=?,jaja_sprzedane=?,cena_sprzedazy=?,uwagi=?,klient_id=?,zamowienie_id=?,typ_sprzedazy=? WHERE gospodarstwo_id=? AND data=?",
-                   (jaja, sprzed, cena, uwagi, kid, zid, typ, g, data))
-        db.commit(); db.close()
-        flash("Wpis " + data + " zaktualizowany.")
-        return redirect("/produkcja")
-
-    db.close()
-    kl_opt = "<option value=''>— anonimowa —</option>" + "".join(
-        "<option value='" + str(k["id"]) + "' " + ("selected" if r["klient_id"]==k["id"] else "") + ">" + k["nazwa"] + "</option>"
-        for k in klienci)
-    zam_opt = "<option value=''>— bez zamówienia —</option>" + "".join(
-        "<option value='" + str(z["id"]) + "' " + ("selected" if r["zamowienie_id"]==z["id"] else "") + ">"
-        + (z["kn"] or "?") + " " + z["data_dostawy"] + " (" + str(z["ilosc"]) + " szt.)</option>"
-        for z in zamow)
-    typ_opt = "".join(
-        "<option value='" + v + "' " + ("selected" if (dict(r).get("typ_sprzedazy") or "")==v else "") + ">" + l + "</option>"
-        for v,l in [("gotowka","Gotówka"),("przelew","Przelew"),("z_salda","Z salda"),("nastepnym_razem","Następnym razem")])
-
-    html = (
-        "<h1>Edytuj wpis — " + data + "</h1>"
-        "<div class='card'><form method='POST'>"
-        "<div class='al alw'>Edytujesz dane z <b>" + data + "</b>. "
-        "Przydatne np. gdy jaja się stłukły po przeliczeniu lub pomyłka w zapisie.</div>"
-        "<div class='g2' style='margin-top:12px'>"
-        "<div><label>Zebrane jaja (szt)</label>"
-        "<input name='jaja_zebrane' type='number' min='0' value='" + str(r["jaja_zebrane"]) + "' style='font-size:22px;text-align:center'></div>"
-        "<div><label>Sprzedane (szt)</label>"
-        "<input name='jaja_sprzedane' type='number' min='0' value='" + str(r["jaja_sprzedane"]) + "' id='sp' oninput='cW()' style='font-size:22px;text-align:center'></div>"
-        "</div>"
-        "<div class='g2' style='margin-top:8px'>"
-        "<div><label>Cena/szt (zł)</label>"
-        "<input name='cena_sprzedazy' type='number' step='0.01' value='" + str(r["cena_sprzedazy"] or "") + "' id='cn' oninput='cW()'></div>"
-        "<div style='padding-top:20px'><div style='background:#f5f5f0;border-radius:8px;padding:8px 12px;font-size:14px'>Wartość: <b id='wrt'>0.00 zł</b></div></div>"
-        "</div>"
-        "<div class='g2' style='margin-top:8px'>"
-        "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
-        "<div><label>Typ płatności</label><select name='typ_sprzedazy'>" + typ_opt + "</select></div>"
-        "</div>"
-        "<label>Powiązane zamówienie</label><select name='zamowienie_id'>" + zam_opt + "</select>"
-        "<label style='margin-top:8px'>Uwagi / powód korekty</label>"
-        "<input name='uwagi' value='" + (r["uwagi"] or "") + "' placeholder='np. stłukło się 3 jaja po przeliczeniu'>"
-        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz korektę</button>"
-        "<a href='/produkcja' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
-        "</form></div>"
-        "<script>function cW(){var s=parseFloat(document.getElementById('sp').value)||0,c=parseFloat(document.getElementById('cn').value)||0;document.getElementById('wrt').textContent=(s*c).toFixed(2)+' zł';}cW();</script>"
-    )
-    return R(html, "prod")
-
+# Produkcja i klienci przeniesione do produkcja_views.py
 
 @app.route("/stado")
 @farm_required
@@ -1117,81 +1011,7 @@ def zamowienie_status(zid, status):
     flash("Status: " + status)
     return redirect("/zamowienia")
 
-@app.route("/klienci")
-@farm_required
-def klienci():
-    g = gid()
-    db = get_db()
-    rows = db.execute("SELECT * FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
-    db.close()
-    w = "".join(
-        '<tr><td>' + r["nazwa"] + '</td><td>' + (r["telefon"] or "") + '</td><td>' + (r["adres"] or "") + '</td>'
-        '<td><a href="/klienci/' + str(r["id"]) + '/edytuj" class="btn bo bsm">Edytuj</a></td></tr>'
-        for r in rows
-    )
-    html = (
-        '<h1>Klienci</h1><a href="/klienci/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj</a>'
-        '<div class="card" style="overflow-x:auto"><table>'
-        '<thead><tr><th>Nazwa</th><th>Telefon</th><th>Adres</th><th></th></tr></thead>'
-        '<tbody>' + (w or '<tr><td colspan=4 style="color:#888;text-align:center;padding:16px">Brak klientów</td></tr>') + '</tbody></table></div>'
-    )
-    return R(html, "zam")
-
-@app.route("/klienci/dodaj", methods=["GET","POST"])
-@farm_required
-def klienci_dodaj():
-    g = gid()
-    if request.method == "POST":
-        db = get_db()
-        db.execute("INSERT INTO klienci(gospodarstwo_id,nazwa,telefon,email,adres,uwagi) VALUES(?,?,?,?,?,?)",
-            (g, request.form["nazwa"], request.form.get("telefon",""),
-             request.form.get("email",""), request.form.get("adres",""), request.form.get("uwagi","")))
-        db.commit(); db.close()
-        flash("Klient dodany.")
-        return redirect("/klienci")
-    html = (
-        '<h1>Nowy klient</h1><div class="card"><form method="POST">'
-        '<label>Nazwa</label><input name="nazwa" required>'
-        '<div class="g2">'
-        '<div><label>Telefon</label><input name="telefon" type="tel"></div>'
-        '<div><label>Email</label><input name="email" type="email"></div>'
-        '</div>'
-        '<label>Adres</label><textarea name="adres" rows="2"></textarea>'
-        '<br><button class="btn bp">Zapisz</button>'
-        '<a href="/klienci" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
-    )
-    return R(html, "zam")
-
-@app.route("/klienci/<int:kid>/edytuj", methods=["GET","POST"])
-@farm_required
-def klienci_edytuj(kid):
-    g = gid()
-    db = get_db()
-    if request.method == "POST":
-        db.execute("UPDATE klienci SET nazwa=?,telefon=?,email=?,adres=?,uwagi=? WHERE id=? AND gospodarstwo_id=?",
-            (request.form["nazwa"], request.form.get("telefon",""), request.form.get("email",""),
-             request.form.get("adres",""), request.form.get("uwagi",""), kid, g))
-        db.commit(); db.close()
-        flash("Klient zaktualizowany.")
-        return redirect("/klienci")
-    r = db.execute("SELECT * FROM klienci WHERE id=? AND gospodarstwo_id=?", (kid,g)).fetchone()
-    db.close()
-    if not r: return redirect("/klienci")
-    html = (
-        '<h1>Edytuj klienta</h1><div class="card"><form method="POST">'
-        '<label>Nazwa</label><input name="nazwa" required value="' + r["nazwa"] + '">'
-        '<div class="g2">'
-        '<div><label>Telefon</label><input name="telefon" value="' + (r["telefon"] or "") + '"></div>'
-        '<div><label>Email</label><input name="email" value="' + (r["email"] or "") + '"></div>'
-        '</div>'
-        '<label>Adres</label><textarea name="adres" rows="2">' + (r["adres"] or "") + '</textarea>'
-        '<label>Uwagi</label><input name="uwagi" value="' + (r["uwagi"] or "") + '">'
-        '<br><button class="btn bp">Zapisz</button>'
-        '<a href="/klienci" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
-    )
-    return R(html, "zam")
+# Klienci przeniesione do produkcja_views.py
 
 # ─── WYDATKI ──────────────────────────────────────────────────────────────────
 KATEGORIE = ["Zboże/pasza","Witaminy/suplementy","Wyposażenie","Weterynarz","Ściółka","Prąd/gaz","Inne"]
@@ -2277,6 +2097,7 @@ def admin_config():
 register_routes(app)
 if register_supla_oauth_routes:
     register_supla_oauth_routes(app)
+register_produkcja(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
