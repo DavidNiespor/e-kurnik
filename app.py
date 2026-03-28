@@ -628,6 +628,27 @@ def _kafelki_czynnosci(g, db_cz=None):
     )
 
 
+@app.route("/produkcja/dodaj", methods=["POST"])
+@farm_required
+def produkcja_dodaj():
+    g = gid()
+    d     = request.form.get("data", date.today().isoformat())
+    jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
+    pasza = float(request.form.get("pasza_wydana_kg", 0) or 0)
+    uwagi = request.form.get("uwagi", "")
+    db = get_db()
+    ex = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, d)).fetchone()
+    if ex:
+        db.execute("UPDATE produkcja SET jaja_zebrane=?, pasza_wydana_kg=?, uwagi=? WHERE id=?",
+                   (jaja, pasza, uwagi, ex["id"]))
+    else:
+        db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,uwagi) VALUES(?,?,?,0,0,?,?)",
+                   (g, d, jaja, pasza, uwagi))
+    db.commit(); db.close()
+    flash("Zapisano: " + str(jaja) + " jaj (" + d + ")")
+    return redirect("/")
+
+
 @app.route("/")
 @farm_required
 def dashboard():
@@ -642,6 +663,7 @@ def dashboard():
     zysk = db.execute("SELECT COALESCE(SUM(jaja_sprzedane*cena_sprzedazy),0) as s FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
+    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 7", (g,)).fetchall()
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
@@ -750,6 +772,39 @@ def dashboard():
     _dzisiaj = date.today()
     _data_str = f'{_dni_pl[_dzisiaj.weekday()]}, {_dzisiaj.day} {_mies_pl[_dzisiaj.month-1]} {_dzisiaj.year}'
 
+
+    # Formularz "Zebrane jaja" — mini historia + wybór daty
+    _ostatnie_html = ""
+    for _r in ostatnie:
+        _ostatnie_html += (
+            "<div style='background:#f5f5f0;border-radius:6px;padding:3px 8px;font-size:11px;white-space:nowrap'>"
+            "<span style='color:#888'>" + _r["data"][5:] + "</span> "
+            "<b>" + str(_r["jaja_zebrane"]) + "</b>"
+            "</div>"
+        )
+    _jaja_form = (
+        "<div class='card'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+        "<b>Zebrane jaja</b>"
+        + ("<span style='font-size:12px;color:#3B6D11;font-weight:500'>dziś: " + str(dzis["jaja_zebrane"]) + " szt.</span>"
+           if dzis else "<span style='font-size:12px;color:#aaa'>brak wpisu na dziś</span>")
+        + "</div>"
+        + ("<div style='display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px'>" + _ostatnie_html + "</div>"
+           if _ostatnie_html else "")
+        + "<form method='POST' action='/produkcja/dodaj'>"
+        + "<div style='display:flex;gap:8px;align-items:flex-end'>"
+        + "<div style='flex:1'><label>Szt. jaj</label>"
+        + "<input name='jaja_zebrane' type='number' min='0' value='"
+        + (str(dzis["jaja_zebrane"]) if dzis else "")
+        + "' style='font-size:20px;text-align:center' required></div>"
+        + "<div><label>Data</label>"
+        + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:13px'></div>"
+        + "</div>"
+        + "<input type='hidden' name='pasza_wydana_kg' value='" + str(pdz) + "'>"
+        + "<button class='btn bg' style='width:100%;margin-top:10px;padding:11px'>Zapisz</button>"
+        + "</form></div>"
+    )
+
     html = (
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
         '<h1 style="margin-bottom:0">Dashboard</h1>'
@@ -767,15 +822,7 @@ def dashboard():
         + '<div class="g2">'
 
         # Formularz 1: Zebrane jaja
-        + '<div class="card"><b>Zebrane jaja — dziś</b>'
-        + ('<span style="font-size:12px;color:#3B6D11;margin-left:8px;font-weight:500">wpisano: ' + str(dzis["jaja_zebrane"]) + '</span>' if dzis else '')
-        + '<form method="POST" action="/produkcja/dodaj" style="margin-top:10px">'
-        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-        + '<label>Zebrane jaja (szt)</label>'
-        + '<input name="jaja_zebrane" type="number" min="0" value="' + (str(dzis["jaja_zebrane"]) if dzis else "") + '" style="font-size:18px;text-align:center">'
-        + '<input type="hidden" name="pasza_wydana_kg" value="' + str(pdz) + '">'
-        + '<br><button class="btn bg" style="width:100%;margin-top:10px;padding:12px">Zapisz jaja</button>'
-        + '</form></div>'
+        + _jaja_form
 
         # Formularz 2: Sprzedaż z klientem
         + '<div class="card"><b>Sprzedaż — dziś</b>'
