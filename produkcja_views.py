@@ -95,8 +95,8 @@ def register_produkcja(app):
             "<label style='margin-top:12px'>Zebrane jaja (szt)</label>"
             f"<input name='jaja_zebrane' type='number' min='0' value='{r['jaja_zebrane']}' "
             "style='font-size:28px;text-align:center'>"
-            "<label>Pasza wydana (kg)</label>"
-            f"<input name='pasza_wydana_kg' type='number' step='0.1' value='{r['pasza_wydana_kg'] or ''}'>"
+            # Pasza jako hidden - zachowaj bez zmian przy edycji zbioru
+            f"<input type='hidden' name='pasza_wydana_kg' value='{r['pasza_wydana_kg'] or 0}'>"
             "<label>Uwagi (np. stłukło się X jaj, choroba)</label>"
             f"<input name='uwagi' value='{r['uwagi'] or ''}' placeholder='opcjonalnie'>"
             "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz korektę</button>"

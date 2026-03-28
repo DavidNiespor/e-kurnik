@@ -446,7 +446,7 @@ def register_routes(app):
             for z in zamow)
         typ_opt="".join(f'<option value="{v}" {"selected" if dzis and dzis.get("typ_sprzedazy")==v else ""}>{l}</option>'
             for v,l in [("gotowka","Gotówka"),("przelew","Przelew"),("z_salda","Z salda"),("nastepnym_razem","Następnym razem")])
-        html=('<h1>Wpis produkcji i sprzedaży</h1><div class="card"><form method="POST">'
+        html=('<h1>Wpis produkcji i sprzedaży</h1><div class="card"><form method="POST" action="/produkcja/dodaj-pelny">'
             f'<label>Data</label><input name="data" type="date" value="{d_p}">'
             '<div class="g3">'
             f'<div><label>Zebrane jaja</label><input name="jaja_zebrane" type="number" value="{dzis["jaja_zebrane"] if dzis else ""}"></div>'
