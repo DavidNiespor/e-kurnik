@@ -2000,8 +2000,10 @@ def urzadzenia_panel(did):
         'fetch("/sterowanie/cmd",{method:"POST",'
         'headers:{"Content-Type":"application/json"},'
         'body:JSON.stringify({urzadzenie_id:uid,kanal:ch,stan:state})})'
-        '.then(r=>r.json()).then(()=>location.reload());}'
-        '</script>'
+        '.then(function(r){return r.json();})'
+        '.then(function(j){if(j.ok)location.reload();else alert("Blad: "+(j.msg||"?"));})'
+        '.catch(function(e){alert("Blad: "+e);});'
+        '}</script>'
     )
     return R(html, "urz")
 

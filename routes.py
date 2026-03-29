@@ -876,11 +876,17 @@ def register_routes(app):
     @app.route("/sterowanie/cmd", methods=["POST"])
     @farm_required
     def sterowanie_cmd():
-        g = gid(); data = request.get_json()
+        g = gid()
+        data = request.get_json(silent=True) or {}
         did   = data.get("urzadzenie_id")
         kanal = data.get("kanal","")
         stan  = data.get("stan", False)
-        ok, msg = _send(did, kanal, stan, g)
+        if not kanal:
+            return jsonify({"ok": False, "msg": "Brak kanalu"})
+        try:
+            ok, msg = _send(did, kanal, stan, g)
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)})
         return jsonify({"ok": ok, "msg": msg})
 
 
