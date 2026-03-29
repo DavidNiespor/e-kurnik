@@ -59,7 +59,7 @@ def _card(title, sub, items, harm_cnt, btn=""):
     )
 
 
-def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R):
+def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=""):
     lok  = [k for k in kanaly if (k["tryb"] or "") in ("rpi_gpio", "rpi_siec", "esphome")]
     supl = [k for k in kanaly if (k["tryb"] or "") in ("supla", "supla+rpi")]
     rucz = [k for k in kanaly if not (k["tryb"] or "").strip() or k["tryb"] == "reczny"]
@@ -134,4 +134,4 @@ def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R):
         "Kliknij ⚙ przy kanale aby zmienić tryb.</p>"
         "</div></details>"
     )
-    return R(html, "gpio")
+    return R(extra_html + html, "gpio")

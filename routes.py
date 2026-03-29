@@ -237,6 +237,28 @@ def register_routes(app):
 
     # ─── HELPER send_cmd ──────────────────────────────────────────────────────
     def _send(did, kanal, stan, g):
+        # Supla: kanal zaczyna sie od "supla_"
+        if kanal and str(kanal).startswith("supla_"):
+            try:
+                ch_id = int(str(kanal).replace("supla_", ""))
+                from supla_oauth import set_channel_state
+                db = get_db()
+                row = db.execute(
+                    "SELECT wartosc FROM ustawienia WHERE klucz='supla_access_token' AND gospodarstwo_id=?",
+                    (g,)).fetchone()
+                db.close()
+                if not row or not row["wartosc"]: return False, "Brak tokenu Supla — połącz w Sterowanie → Supla"
+                result = set_channel_state(row["wartosc"], ch_id, bool(stan))
+                ok = "error" not in result
+                if ok:
+                    db2 = get_db()
+                    db2.execute("UPDATE supla_config SET ostatni_stan=? WHERE channel_id=? AND gospodarstwo_id=?",
+                               (1 if stan else 0, ch_id, g))
+                    db2.commit(); db2.close()
+                return ok, ("OK" if ok else str(result.get("msg","Błąd Supla")))
+            except Exception as e:
+                return False, str(e)
+        # GPIO / ESPHome
         db = get_db()
         dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
         if not dev: db.close(); return False, "Brak urządzenia"
@@ -656,6 +678,10 @@ def register_routes(app):
             "ON ks.urzadzenie_id=uc.urzadzenie_id AND ks.kanal=uc.kanal "
             "WHERE u.gospodarstwo_id=? AND u.aktywne=1 "
             "ORDER BY u.nazwa, uc.kanal", (g,)).fetchall()
+        # Dodaj kanaly Supla jako osobne wpisy
+        supla_rows = db.execute(
+            "SELECT id, nazwa, channel_id, ostatni_stan FROM supla_config "
+            "WHERE gospodarstwo_id=? AND aktywny=1 ORDER BY nazwa", (g,)).fetchall()
         harm_cnt = {
             (h["urzadzenie_id"], h["kanal"]): h["n"]
             for h in db.execute(
@@ -667,7 +693,39 @@ def register_routes(app):
             "SELECT 1 FROM ustawienia WHERE klucz='supla_access_token' "
             "AND gospodarstwo_id=?", (g,)).fetchone())
         db.close()
-        return render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R)
+        # Dobuduj HTML dla sekcji Supla
+        supla_html = ""
+        if supla_rows:
+            rows_html = ""
+            for s in supla_rows:
+                on = bool(s["ostatni_stan"])
+                kanal_s = "supla_" + str(s["channel_id"])
+                rows_html += (
+                    "<div style='display:flex;align-items:center;justify-content:space-between;"
+                    "padding:10px;background:#fafaf8;border-radius:8px;margin-bottom:6px'>"
+                    "<div>"
+                    "<div style='font-weight:500'>" + s["nazwa"] + "</div>"
+                    "<div style='font-size:11px;color:#888'>ch:" + str(s["channel_id"]) + "</div>"
+                    "</div>"
+                    "<div style='display:flex;gap:6px;align-items:center'>"
+                    "<span style='font-size:12px;color:" + ("#3B6D11" if on else "#888") + ";font-weight:600'>" + ("● ON" if on else "○ OFF") + "</span>"
+                    "<button class='btn bg bsm' onclick='tR(null,\"" + kanal_s + "\",true)'>ON</button>"
+                    "<button class='btn br bsm' onclick='tR(null,\"" + kanal_s + "\",false)'>OFF</button>"
+                    "<a href='/supla/" + str(s["id"]) + "/edytuj' class='btn bo bsm'>⚙</a>"
+                    "</div></div>"
+                )
+            supla_html = (
+                "<div class='card' style='margin-bottom:12px'>"
+                "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>"
+                "<b>☁ Supla Cloud</b>"
+                "<a href='/supla' class='btn bo bsm'>Panel Supla →</a>"
+                "</div>"
+                + rows_html
+                + ("" if supla_ok else "<div class='al alw' style='margin-top:8px;font-size:12px'>Nie połączono z Supla. <a href='/supla/oauth/start'>Połącz →</a></div>")
+                + "<script>function tR(d,c,s){fetch('/sterowanie/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(r=>r.json()).then(function(j){if(j.ok)location.reload();else alert('Blad: '+(j.msg||'?'));});}</script>"
+                + "</div>"
+            )
+        return render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=supla_html)
 
     @app.route("/sterowanie/kanal/<int:did>/<kanal>", methods=["GET","POST"])
     @farm_required

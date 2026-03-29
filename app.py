@@ -668,13 +668,23 @@ def dashboard():
     kanal_cfg = {}
     for fkey, fico, flabel, fkat in FIXED_CH:
         cfg = db2.execute(
-            "SELECT ks.urzadzenie_id, ks.kanal, ks.opis, uc.stan "
-            "FROM kanal_sterowanie ks "
-            "LEFT JOIN urzadzenia_kanaly uc "
-            "  ON uc.urzadzenie_id=ks.urzadzenie_id AND uc.kanal=ks.kanal "
-            "WHERE ks.gospodarstwo_id=? AND ks.kategoria=? "
-            "ORDER BY ks.id LIMIT 1", (g, fkat)).fetchone()
-        kanal_cfg[fkey] = dict(cfg) if cfg else None
+            "SELECT ks.urzadzenie_id, ks.kanal, ks.tryb, ks.supla_channel_id, ks.opis,"
+            " COALESCE(uc.stan, sc.ostatni_stan, 0) as stan"
+            " FROM kanal_sterowanie ks"
+            " LEFT JOIN urzadzenia_kanaly uc"
+            "   ON uc.urzadzenie_id=ks.urzadzenie_id AND uc.kanal=ks.kanal"
+            " LEFT JOIN supla_config sc"
+            "   ON sc.channel_id=ks.supla_channel_id AND sc.gospodarstwo_id=ks.gospodarstwo_id"
+            " WHERE ks.gospodarstwo_id=? AND ks.kategoria=?"
+            " ORDER BY ks.id LIMIT 1", (g, fkat)).fetchone()
+        if cfg:
+            c = dict(cfg)
+            # Dla Supla: kanal = "supla_CHANNEL_ID"
+            if c.get("tryb") == "supla" and c.get("supla_channel_id"):
+                c["kanal"] = "supla_" + str(c["supla_channel_id"])
+            kanal_cfg[fkey] = c
+        else:
+            kanal_cfg[fkey] = None
     woda_dzis  = float(db2.execute("SELECT COALESCE(SUM(litry),0) as s FROM woda_reczna WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     prad_dzis  = float(db2.execute("SELECT COALESCE(SUM(kwh),0) as s FROM prad_odczyty WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     pasza_dzis = float(db2.execute("SELECT COALESCE(SUM(pasza_wydana_kg),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
