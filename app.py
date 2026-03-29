@@ -1096,7 +1096,7 @@ def wydatki():
 def wydatki_dodaj():
     g = gid()
     prefill_nazwa = request.args.get("nazwa","")
-    prefill_kat   = request.args.get("kategoria","Zboże/pasza")
+    prefill_kat   = request.args.get("kategoria","Zboz/pasza")
 
     if request.method == "POST":
         db = get_db()
@@ -1124,12 +1124,12 @@ def wydatki_dodaj():
                     "INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,"
                     "cena_jednostkowa,wartosc_total,dostawca,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (g, data_w, kat, naz, il, jedn, cj, tot, dostawca, uwagi_gl))
-                if kat in ("Zboże/pasza","Witaminy/suplementy") and il > 0:
+                if kat in ("Zboz/pasza","Witaminy/suplementy","Zboze/pasza","Zboże/pasza") and il > 0:
                     ex = db.execute(
                         "SELECT id FROM stan_magazynu WHERE gospodarstwo_id=? AND nazwa=? AND kategoria=?",
                         (g,naz,kat)).fetchone()
                     if ex:
-                        db.execute("UPDATE stan_magazynu SET stan=stan+?,cena_aktualna=? WHERE id=?", (il,cj,ex["id"]))
+                        db.execute("UPDATE stan_magazynu SET stan=stan+?,cena_aktualna=? WHERE id=?",(il,cj,ex["id"]))
                     else:
                         db.execute(
                             "INSERT INTO stan_magazynu(gospodarstwo_id,kategoria,nazwa,jednostka,stan,cena_aktualna)"
@@ -1146,75 +1146,114 @@ def wydatki_dodaj():
 
     import json as _j
     kat_json = _j.dumps(KATEGORIE)
-    pn = prefill_nazwa.replace('"','').replace("'","")
-    pk = prefill_kat.replace('"','').replace("'","")
-    nxt = request.args.get("next","/wydatki")
+    pn = prefill_nazwa.replace('"','').replace("'","").replace("\\","")
+    pk = prefill_kat.replace('"','').replace("'","").replace("\\","")
+    nxt = request.args.get("next","/wydatki").replace('"','')
 
-    js = ("""<script>
-var _sc=null,ri=0;
-var KATS=__KATS__;
-var PFN="__PFN__",PFK="__PFK__";
-function addRow(pn,pk,pc){
-  pn=pn!==undefined?pn:PFN; pk=pk!==undefined?pk:PFK; pc=pc||0;
-  var i=ri++;
-  var kopts=KATS.map(function(k){return '<option value="'+k+'"'+(k===pk?' selected':'')+'>'+k+'</option>';}).join('');
-  var d=document.createElement('div');
-  d.id='wr'+i;
-  d.style.cssText='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 130px 90px 30px;gap:6px;align-items:start;margin-bottom:6px;padding:6px;background:#fafaf8;border-radius:8px';
-  var inp_naz='<div style="position:relative"><input name="naz_'+i+'" autocomplete="off" required placeholder="Pszenica..." style="width:100%" oninput="sug(this,'+i+')" onblur="setTimeout(function(){hsg('+i+')},200)"><div id="sg'+i+'" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d3d1c7;border-radius:0 0 8px 8px;z-index:200;max-height:160px;overflow-y:auto"></div></div>';
-  var inp_kat='<select name="kat_'+i+'">'+kopts+'</select>';
-  var inp_il='<input name="il_'+i+'" type="number" step="0.01" min="0" placeholder="0" style="text-align:center" oninput="rc('+i+')">';
-  var inp_jedn='<select name="jedn_'+i+'"><option value="kg">kg</option><option value="szt">szt</option><option value="l">l</option><option value="op">op.</option></select>';
-  var inp_cena='<div style="display:flex;gap:3px;align-items:center"><input name="cena_'+i+'" type="number" step="0.01" min="0" placeholder="0.00" style="flex:1;min-width:0;text-align:right" oninput="rc('+i+')"><span id="cl'+i+'" style="font-size:10px;color:#888;white-space:nowrap">zł/kg</span></div>';
-  var inp_tryb='<div><select name="tryb_c_'+i+'" onchange="ot('+i+')" style="font-size:11px"><option value="za_kg">zł/kg</option><option value="za_t">zł/T</option><option value="za_calosc">całość</option></select><div id="rt'+i+'" style="font-size:11px;color:#3B6D11;font-weight:600;text-align:center;margin-top:2px">0.00 zł</div></div>';
-  var btn_del='<button type="button" onclick="document.getElementById(\'wr'+i+'\').remove();cg()" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1">✕</button>';
-  d.innerHTML=inp_naz+inp_kat+inp_il+inp_jedn+inp_cena+inp_tryb+btn_del;
-  document.getElementById('wyd-rows').appendChild(d);
-  if(pc>0){d.querySelector('[name="cena_'+i+'"]').value=pc;rc(i);}
-}
-function ot(i){
-  var t=document.querySelector('[name="tryb_c_'+i+'"]').value;
-  document.getElementById('cl'+i).textContent=t==='za_kg'?'zł/kg':t==='za_t'?'zł/T':'zł tot';rc(i);
-}
-function rc(i){
-  var il=parseFloat(document.querySelector('[name="il_'+i+'"]').value)||0;
-  var c=parseFloat(document.querySelector('[name="cena_'+i+'"]').value)||0;
-  var t=document.querySelector('[name="tryb_c_'+i+'"]').value;
-  var cj=t==='za_kg'?c:t==='za_t'?c/1000:il>0?c/il:0;
-  var el=document.getElementById('rt'+i);if(el)el.textContent=(il*cj).toFixed(2)+' zł';cg();
-}
-function cg(){
-  var s=0;document.querySelectorAll('[id^="rt"]').forEach(function(e){s+=parseFloat(e.textContent)||0;});
-  document.getElementById('grand-tot').textContent=s.toFixed(2)+' zł';
-}
-function sug(inp,i){
-  var q=inp.value;if(q.length<2){hsg(i);return;}
-  if(!_sc){fetch('/api/wszystkie-skladniki').then(r=>r.json()).then(function(d){_sc=d;_sh(q,i,d);});return;}
-  _sh(q,i,_sc);
-}
-function _sh(q,i,data){
-  var f=data.filter(function(d){return d.nazwa.toLowerCase().includes(q.toLowerCase());}).slice(0,8);
-  var el=document.getElementById('sg'+i);if(!f.length){el.style.display='none';return;}
-  el.innerHTML=f.map(function(d){
-    return '<div style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #f0ede4" onmousedown="pk('+i+',this)" data-n="'+d.nazwa+'" data-k="'+d.kategoria+'" data-c="'+d.cena+'"><b>'+d.nazwa+'</b> <span style="color:#888;font-size:12px">('+d.kategoria+')</span>'+(d.cena>0?' <span style="float:right;color:#534AB7">'+d.cena+' zł/kg</span>':'')+'</div>';
-  }).join('');el.style.display='block';
-}
-function pk(i,el){
-  var naz=el.dataset.n,kat=el.dataset.k,c=parseFloat(el.dataset.c)||0;
-  document.querySelector('[name="naz_'+i+'"]').value=naz;hsg(i);
-  var map={zboze:'Zboże/pasza',bialkowe:'Zboże/pasza',premiks:'Witaminy/suplementy',mineralne:'Witaminy/suplementy',naturalny_dodatek:'Witaminy/suplementy'};
-  var mk=map[kat]||kat;
-  var sel=document.querySelector('[name="kat_'+i+'"]');
-  for(var o of sel.options){if(o.value===mk){o.selected=true;break;}}
-  if(c>0){document.querySelector('[name="cena_'+i+'"]').value=c;rc(i);}
-}
-function hsg(i){var e=document.getElementById('sg'+i);if(e)e.style.display='none';}
-document.addEventListener('DOMContentLoaded',function(){addRow(PFN,PFK,0);});
-</script>"""
-    .replace("__KATS__", kat_json)
-    .replace("__PFN__", pn)
-    .replace("__PFK__", pk)
-    )
+    # JS jako lista linii — bez newlines w środku stringów JS
+    js_lines = [
+        "var _sc=null,ri=0;",
+        "var KATS=" + kat_json + ";",
+        'var PFN="' + pn + '",PFK="' + pk + '";',
+        "function mkEl(tag,attrs,style){var e=document.createElement(tag);",
+        "for(var k in attrs)e.setAttribute(k,attrs[k]);",
+        "if(style)e.style.cssText=style;return e;}",
+        "function addRow(pn,pk,pc){",
+        "pn=pn!==undefined?pn:PFN;pk=pk!==undefined?pk:PFK;pc=pc||0;",
+        "var i=ri++;",
+        "var wrap=mkEl('div',{id:'wr'+i},'display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;gap:6px;align-items:start;margin-bottom:6px;padding:6px;background:#fafaf8;border-radius:8px');",
+        # Kolumna 1: Nazwa z suggestbox
+        "var col1=mkEl('div',{},'position:relative');",
+        "var inpN=mkEl('input',{name:'naz_'+i,autocomplete:'off',required:'',placeholder:'Pszenica...'},'width:100%');",
+        "inpN.oninput=function(){sug(this,i);};",
+        "inpN.onblur=function(){setTimeout(function(){hsg(i);},200);};",
+        "inpN.value=pn;",
+        "var sg=mkEl('div',{id:'sg'+i},'display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d3d1c7;border-radius:0 0 8px 8px;z-index:200;max-height:160px;overflow-y:auto');",
+        "col1.appendChild(inpN);col1.appendChild(sg);wrap.appendChild(col1);",
+        # Kolumna 2: Kategoria
+        "var selK=mkEl('select',{name:'kat_'+i});",
+        "KATS.forEach(function(k){var o=mkEl('option',{value:k});o.textContent=k;if(k===pk)o.selected=true;selK.appendChild(o);});",
+        "wrap.appendChild(selK);",
+        # Kolumna 3: Ilość
+        "var inpIl=mkEl('input',{name:'il_'+i,type:'number',step:'0.01',min:'0',placeholder:'0'},'text-align:center');",
+        "inpIl.oninput=function(){rc(i);};",
+        "wrap.appendChild(inpIl);",
+        # Kolumna 4: Jednostka
+        "var selJ=mkEl('select',{name:'jedn_'+i});",
+        "['kg','szt','l','op.'].forEach(function(v){var o=mkEl('option',{value:v});o.textContent=v;selJ.appendChild(o);});",
+        "wrap.appendChild(selJ);",
+        # Kolumna 5: Cena + etykieta
+        "var col5=mkEl('div',{},'display:flex;gap:3px;align-items:center');",
+        "var inpC=mkEl('input',{name:'cena_'+i,type:'number',step:'0.01',min:'0',placeholder:'0.00'},'flex:1;min-width:0;text-align:right');",
+        "inpC.oninput=function(){rc(i);};",
+        "var lbl=mkEl('span',{id:'cl'+i},'font-size:10px;color:#888;white-space:nowrap');lbl.textContent='zl/kg';",
+        "col5.appendChild(inpC);col5.appendChild(lbl);wrap.appendChild(col5);",
+        # Kolumna 6: Tryb + kwota
+        "var col6=mkEl('div',{});",
+        "var selT=mkEl('select',{name:'tryb_c_'+i},'font-size:11px');",
+        "[['za_kg','zl/kg'],['za_t','zl/T'],['za_calosc','calosc']].forEach(function(p){var o=mkEl('option',{value:p[0]});o.textContent=p[1];selT.appendChild(o);});",
+        "selT.onchange=function(){ot(i);};",
+        "var rowTot=mkEl('div',{id:'rt'+i},'font-size:11px;color:#3B6D11;font-weight:600;text-align:center;margin-top:2px');rowTot.textContent='0.00 zl';",
+        "col6.appendChild(selT);col6.appendChild(rowTot);wrap.appendChild(col6);",
+        # Kolumna 7: Usuń
+        "var btn=mkEl('button',{type:'button'},'background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1');",
+        "btn.textContent='x';",
+        "btn.onclick=function(){wrap.parentNode.removeChild(wrap);cg();};",
+        "wrap.appendChild(btn);",
+        "document.getElementById('wyd-rows').appendChild(wrap);",
+        "if(pc>0){inpC.value=pc;rc(i);}",
+        "pn='';pk='';",
+        "}",
+        "function ot(i){",
+        "var t=document.querySelector('[name=\"tryb_c_'+i+'\"]').value;",
+        "var el=document.getElementById('cl'+i);",
+        "if(el)el.textContent=t==='za_kg'?'zl/kg':t==='za_t'?'zl/T':'zl tot';",
+        "rc(i);}",
+        "function rc(i){",
+        "var inpIl=document.querySelector('[name=\"il_'+i+'\"]');",
+        "var inpC=document.querySelector('[name=\"cena_'+i+'\"]');",
+        "var selT=document.querySelector('[name=\"tryb_c_'+i+'\"]');",
+        "if(!inpIl||!inpC||!selT)return;",
+        "var il=parseFloat(inpIl.value)||0;",
+        "var c=parseFloat(inpC.value)||0;",
+        "var t=selT.value;",
+        "var cj=t==='za_kg'?c:t==='za_t'?c/1000:il>0?c/il:0;",
+        "var el=document.getElementById('rt'+i);",
+        "if(el)el.textContent=(il*cj).toFixed(2)+' zl';",
+        "cg();}",
+        "function cg(){",
+        "var s=0;",
+        "document.querySelectorAll('[id^=\"rt\"]').forEach(function(e){s+=parseFloat(e.textContent)||0;});",
+        "document.getElementById('grand-tot').textContent=s.toFixed(2)+' zl';}",
+        "function sug(inp,i){",
+        "var q=inp.value;if(q.length<2){hsg(i);return;}",
+        "if(!_sc){fetch('/api/wszystkie-skladniki').then(function(r){return r.json();}).then(function(d){_sc=d;_sh(q,i,d);});return;}",
+        "_sh(q,i,_sc);}",
+        "function _sh(q,i,data){",
+        "var f=data.filter(function(d){return d.nazwa.toLowerCase().includes(q.toLowerCase());}).slice(0,8);",
+        "var el=document.getElementById('sg'+i);",
+        "if(!el)return;",
+        "if(!f.length){el.style.display='none';return;}",
+        "el.innerHTML='';",
+        "f.forEach(function(d){",
+        "var row=document.createElement('div');",
+        "row.style.cssText='padding:7px 12px;cursor:pointer;border-bottom:1px solid #f0ede4';",
+        "row.innerHTML='<b>'+d.nazwa+'</b> <span style=\"color:#888;font-size:12px\">('+d.kategoria+')</span>'+(d.cena>0?' <span style=\"float:right;color:#534AB7\">'+d.cena+' zl/kg</span>':'');",
+        "row.onmousedown=function(){pk(i,d.nazwa,d.kategoria,d.cena);};",
+        "el.appendChild(row);});",
+        "el.style.display='block';}",
+        "function pk(i,naz,kat,c){",
+        "var inp=document.querySelector('[name=\"naz_'+i+'\"]');if(inp)inp.value=naz;",
+        "hsg(i);",
+        "var map={zboze:'Zboze/pasza',bialkowe:'Zboze/pasza',premiks:'Witaminy/suplementy',mineralne:'Witaminy/suplementy',naturalny_dodatek:'Witaminy/suplementy'};",
+        "var mk=map[kat]||kat;",
+        "var sel=document.querySelector('[name=\"kat_'+i+'\"]');",
+        "if(sel)for(var o of sel.options){if(o.value===mk){o.selected=true;break;}}",
+        "if(c>0){var ci=document.querySelector('[name=\"cena_'+i+'\"]');if(ci){ci.value=c;rc(i);}}}",
+        "function hsg(i){var e=document.getElementById('sg'+i);if(e)e.style.display='none';}",
+        "document.addEventListener('DOMContentLoaded',function(){addRow(PFN,PFK,0);});",
+    ]
+    js = "<script>" + "".join(js_lines) + "</script>"
 
     html = (
         "<h1>Dodaj wydatki</h1>"
@@ -1226,7 +1265,7 @@ document.addEventListener('DOMContentLoaded',function(){addRow(PFN,PFK,0);});
         "<div><label>Uwagi</label><input name='uwagi'></div>"
         "</div>"
         "<div style='margin-top:14px'>"
-        "<div style='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 130px 90px 30px;"
+        "<div style='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;"
         "gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:#888;padding:0 4px'>"
         "<div>Nazwa</div><div>Kategoria</div><div>Ilość</div>"
         "<div>Jedn.</div><div>Cena</div><div>Tryb / kwota</div><div></div>"
