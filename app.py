@@ -30,6 +30,7 @@ except ImportError:
     register_supla_oauth_routes = None
 from produkcja_views import register_produkcja
 from sprzedaz_views import register_sprzedaz
+from backup_views import register_backup
 
 # ─── HELPER: pobierz gid z sesji ─────────────────────────────────────────────
 def gid():
@@ -160,6 +161,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
         <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">&#x1F4B8; Wydatki</a>
         <a href="/pasza" class="{{ 'on' if p=='pasza' }}">&#x1F33E; Pasza</a>
         <a href="/pasza/mieszalnik">&#x2697;&#xFE0F; Mieszalnik</a>
+        <a href="/pasza/zuzycie">&#x1F4CA; Zużycie paszy</a>
         <a href="/woda" class="{{ 'on' if p=='woda' }}">&#x1F4A7; Woda</a>
         <a href="/energia">&#x26A1; Energia</a>
         <div class="nd-sep"></div>
@@ -2134,6 +2136,7 @@ if register_supla_oauth_routes:
     register_supla_oauth_routes(app)
 register_produkcja(app)
 register_sprzedaz(app)
+register_backup(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])
