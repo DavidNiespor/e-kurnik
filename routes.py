@@ -2678,7 +2678,7 @@ def register_routes(app):
                 request.form.get("nazwa","").strip(),
                 request.form.get("ikona","⚡"),
                 request.form.get("kategoria","inne"),
-                request.form.get("urzadzenie_id") or None,
+                _parse_harm_uid(request.form.get("urzadzenie_id","")),
                 request.form.get("kanal","").strip() or None,
                 request.form.get("typ","czas_staly"),
                 request.form.get("czas_wl","").strip() or None,
@@ -2703,6 +2703,10 @@ def register_routes(app):
         urzadz = db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1", (g,)).fetchall()
 
         # Wschód/zachód dziś
+        # Pobierz też kanały Supla przed zamknięciem DB
+        supla_chs = db.execute(
+            "SELECT id, nazwa FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1 ORDER BY nazwa",
+            (g,)).fetchall()
         from scheduler import sun_times
         lat = float(gs("lat","52.0")); lon = float(gs("lon","20.0"))
         sr, ss = sun_times(lat, lon)
@@ -2717,9 +2721,19 @@ def register_routes(app):
         typ_opts = "".join(
             f'<option value="{tv}" {"selected" if typ_cur==tv else ""}>{ico} {tl}</option>'
             for tv, tl, ico in _HAR_TYPY)
-        u_opts = '<option value="">— brak —</option>' + "".join(
-            f'<option value="{u["id"]}" {"selected" if h.get("urzadzenie_id")==u["id"] else ""}>{u["nazwa"]}</option>'
-            for u in urzadz)
+        u_opts = '<option value="">— brak —</option>'
+        if urzadz:
+            u_opts += '<optgroup label="GPIO / ESPHome">'
+            u_opts += "".join(
+                f'<option value="gpio:{u["id"]}" {"selected" if h.get("urzadzenie_id")==str(u["id"]) else ""}>{u["nazwa"]}</option>'
+                for u in urzadz)
+            u_opts += '</optgroup>'
+        if supla_chs:
+            u_opts += '<optgroup label="Supla Cloud">'
+            u_opts += "".join(
+                f'<option value="supla:{s["id"]}" {"selected" if h.get("urzadzenie_id")=="supla:"+str(s["id"]) else ""}>☁ {s["nazwa"]}</option>'
+                for s in supla_chs)
+            u_opts += '</optgroup>'
 
         ikony = ["💡","🚪","🔥","💨","💧","⚡","🌡️","🔔","⏰","🌱"]
         ikona_btns = "".join(
@@ -2829,11 +2843,19 @@ def register_routes(app):
         )
         return R(html, "gpio")
 
-    @app.route("/api/kanaly/<int:uid>")
+    @app.route("/api/kanaly/<path:uid>")
     @farm_required
     def api_kanaly(uid):
-        db = get_db()
-        chs = db.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=? ORDER BY kanal", (uid,)).fetchall()
+        db = get_db(); g = gid()
+        if uid.startswith('supla:'):
+            sid = int(uid[6:])
+            sc = db.execute("SELECT channel_id,nazwa FROM supla_config WHERE id=? AND gospodarstwo_id=?", (sid,g)).fetchone()
+            db.close()
+            if not sc: return jsonify([])
+            return jsonify([{"kanal": "supla_" + str(sc["channel_id"]), "opis": sc["nazwa"]}])
+        # GPIO urządzenie
+        real_uid = int(uid[5:]) if uid.startswith('gpio:') else int(uid)
+        chs = db.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=? ORDER BY kanal", (real_uid,)).fetchall()
         db.close()
         return jsonify([{"kanal": c["kanal"], "opis": c["opis"] or ""} for c in chs])
 

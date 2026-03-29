@@ -41,6 +41,9 @@ def sun_times(lat=52.23, lon=21.01, d=None):
 # ── Wysyłanie komendy ─────────────────────────────────────────────────────────
 def _send(did, kanal, stan, g):
     from db import get_db
+    # Supla - kanal zaczyna sie od 'supla_'
+    if kanal and str(kanal).startswith('supla_'):
+        return _send_supla(kanal, stan, g)
     db = get_db()
     dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
     if not dev:
