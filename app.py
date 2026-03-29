@@ -1161,7 +1161,7 @@ def wydatki_dodaj():
         "function addRow(pn,pk,pc){",
         "pn=pn!==undefined?pn:PFN;pk=pk!==undefined?pk:PFK;pc=pc||0;",
         "var i=ri++;",
-        "var wrap=mkEl('div',{id:'wr'+i},'display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;gap:6px;align-items:start;margin-bottom:6px;padding:6px;background:#fafaf8;border-radius:8px');",
+        "var wrap=document.createElement('div');wrap.id='wr'+i;wrap.className='wyd-row';",
         # Kolumna 1: Nazwa z suggestbox
         "var col1=mkEl('div',{},'position:relative');",
         "var inpN=mkEl('input',{name:'naz_'+i,autocomplete:'off',required:'',placeholder:'Pszenica...'},'width:100%');",
@@ -1265,11 +1265,24 @@ def wydatki_dodaj():
         "<div><label>Uwagi</label><input name='uwagi'></div>"
         "</div>"
         "<div style='margin-top:14px'>"
-        "<div style='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;"
+        "<div class='wyd-hdr' style='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;"
         "gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:#888;padding:0 4px'>"
         "<div>Nazwa</div><div>Kategoria</div><div>Ilość</div>"
         "<div>Jedn.</div><div>Cena</div><div>Tryb / kwota</div><div></div>"
         "</div>"
+        "<style>"
+        ".wyd-row{display:grid;grid-template-columns:2fr 1.4fr 70px 90px 120px 90px 30px;"
+        "gap:6px;align-items:start;margin-bottom:8px;padding:10px;background:#fafaf8;"
+        "border-radius:10px;border:1px solid #e0ddd4}"
+        "@media(max-width:640px){"
+        ".wyd-hdr{display:none!important}"
+        ".wyd-row{display:flex!important;flex-direction:column!important;gap:0!important}"
+        ".wyd-row>*{width:100%!important}"
+        ".wyd-row input,.wyd-row select{font-size:16px!important;padding:10px 8px!important;min-height:44px}"
+        ".wyd-row [id^=cl]{font-size:12px!important}"
+        ".wyd-row [id^=rt]{font-size:13px!important;text-align:left!important;padding:4px 0}"
+        "}"
+        "</style>"
         "<div id='wyd-rows'></div>"
         "</div>"
         "<div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center'>"
@@ -1277,9 +1290,19 @@ def wydatki_dodaj():
         "<div style='flex:1;background:#f5f5f0;border-radius:8px;padding:8px 14px;font-size:14px'>"
         "Łącznie: <b id='grand-tot'>0.00 zł</b></div>"
         "</div>"
-        "<br><button class='btn bp' style='margin-top:8px'>Zapisz wszystkie</button>"
-        "<a href='/wydatki' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "<br><button class='btn bp' style='margin-top:8px;width:100%;padding:12px;font-size:15px'>Zapisz wszystkie</button>"
+        "<a href='/wydatki' class='btn bo' style='margin-top:8px;display:block;text-align:center'>Anuluj</a>"
         "</form>"
+        "<style>"
+        "@media(max-width:640px){"
+        "#wyd-rows [id^='wr']{"
+        "grid-template-columns:1fr 1fr!important;"
+        "}"
+        "#wyd-rows [id^='wr'] [id^='sg']{"
+        "position:fixed!important;left:12px!important;right:12px!important;top:auto!important;"
+        "}"
+        "}"
+        "</style>"
         + js +
         "</div>"
     )
