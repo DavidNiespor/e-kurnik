@@ -355,7 +355,21 @@ def init_db():
         "ALTER TABLE produkcja ADD COLUMN klient_id INTEGER REFERENCES klienci(id)",
         "ALTER TABLE produkcja ADD COLUMN zamowienie_id INTEGER REFERENCES zamowienia(id)",
         "ALTER TABLE produkcja ADD COLUMN typ_sprzedazy TEXT DEFAULT 'gotowka'",
+        "ALTER TABLE produkcja ADD COLUMN uwagi TEXT DEFAULT ''",
         "ALTER TABLE kanal_sterowanie ADD COLUMN kategoria TEXT DEFAULT 'inne'",
+        "ALTER TABLE kanal_sterowanie ADD COLUMN supla_channel_id INTEGER",
+        "ALTER TABLE kanal_sterowanie ADD COLUMN esphome_entity TEXT DEFAULT ''",
+        "ALTER TABLE kanal_sterowanie ADD COLUMN gpio_pin INTEGER",
+        "ALTER TABLE urzadzenia ADD COLUMN api_key TEXT DEFAULT ''",
+        "ALTER TABLE urzadzenia ADD COLUMN aktywne INTEGER DEFAULT 1",
+        "ALTER TABLE urzadzenia ADD COLUMN ostatni_kontakt DATETIME",
+        "ALTER TABLE urzadzenia ADD COLUMN status TEXT DEFAULT 'nieznany'",
+        "ALTER TABLE urzadzenia_kanaly ADD COLUMN stan INTEGER DEFAULT 0",
+        "ALTER TABLE stan_magazynu ADD COLUMN min_zapas REAL DEFAULT 0",
+        "ALTER TABLE stan_magazynu ADD COLUMN cena_aktualna REAL DEFAULT 0",
+        "ALTER TABLE konta_saldo ADD COLUMN saldo_jaj INTEGER DEFAULT 0",
+        "ALTER TABLE konta_transakcje ADD COLUMN zamowienie_id INTEGER",
+        "ALTER TABLE konta_transakcje ADD COLUMN saldo_po REAL DEFAULT 0",
     ]:
         try: db.execute(_col); db.commit()
         except: pass

@@ -79,20 +79,30 @@ def api_call(access_token, path, method="GET", body=None):
 
 
 def get_channels(access_token):
-    """Pobiera wszystkie kanaly przez paginacje."""
+    """Pobiera wszystkie kanaly - Supla API uzywa offset pagination."""
     all_ch = []
-    page = 1
+    offset = 0
+    limit  = 100
     while True:
+        # Supla v2.4.0: limit + offset, odpowiedz moze byc lista lub obiektem
         result = api_call(access_token,
-            f"/channels?include=state,iodevice&limit=100&page={page}")
-        if isinstance(result, dict) and "error" in result:
-            return result
-        if not isinstance(result, list):
+            f"/channels?include=state,iodevice&limit={limit}&offset={offset}")
+        # Obsłuż różne formaty odpowiedzi
+        if isinstance(result, list):
+            items = result
+        elif isinstance(result, dict):
+            if "error" in result:
+                return result
+            # Niektóre wersje API zwracają {"items": [...]}
+            items = result.get("items", result.get("channels", []))
+            if not items:
+                break
+        else:
             break
-        all_ch.extend(result)
-        if len(result) < 100:
+        all_ch.extend(items)
+        if len(items) < limit:
             break
-        page += 1
+        offset += limit
     return all_ch
 
 
