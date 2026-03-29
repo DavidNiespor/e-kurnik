@@ -1522,46 +1522,6 @@ def register_routes(app):
             f'<tbody>{w}</tbody></table></div>')
         return R(html,"ana")
 
-    @app.route("/pasza/skladnik-baza/dodaj", methods=["GET","POST"])
-    @app.route("/pasza/skladnik-baza/<int:sid>/edytuj", methods=["GET","POST"])
-    @farm_required
-    def pasza_skladnik_baza_form(sid=None):
-        db=get_db()
-        if request.method=="POST":
-            f=request.form
-            vals=(f["nazwa"],f.get("kategoria","inne"),
-                  float(f.get("cena_pln_t",0) or 0),
-                  float(f.get("bialko_pct",0) or 0),float(f.get("energia_me",0) or 0),
-                  float(f.get("tluszcz_pct",0) or 0),float(f.get("wlokno_pct",0) or 0),
-                  float(f.get("wapn_g_kg",0) or 0),float(f.get("fosfor_g_kg",0) or 0),
-                  float(f.get("lizyna_g_kg",0) or 0),float(f.get("metionina_g_kg",0) or 0),
-                  f.get("uwagi",""))
-            if sid:
-                db.execute("UPDATE skladniki_baza SET nazwa=?,kategoria=?,cena_pln_t=?,bialko_pct=?,energia_me=?,tluszcz_pct=?,wlokno_pct=?,wapn_g_kg=?,fosfor_g_kg=?,lizyna_g_kg=?,metionina_g_kg=?,uwagi=? WHERE id=?",(*vals,sid))
-            else:
-                db.execute("INSERT INTO skladniki_baza(nazwa,kategoria,cena_pln_t,bialko_pct,energia_me,tluszcz_pct,wlokno_pct,wapn_g_kg,fosfor_g_kg,lizyna_g_kg,metionina_g_kg,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",vals)
-            db.commit(); db.close(); flash("Składnik zapisany."); return redirect("/pasza/skladniki-baza")
-        s=dict(db.execute("SELECT * FROM skladniki_baza WHERE id=?",(sid,)).fetchone()) if sid else {}
-        db.close()
-        kat_opt="".join('<option value="'+k+'" '+("selected" if s.get("kategoria")==k else "")+'>'+l+'</option>'
-            for k,l in [("zboze","Zboże"),("bialkowe","Białkowe"),("mineralne","Mineralne"),("premiks","Premiks"),("naturalny_dodatek","Naturalny dodatek"),("inne","Inne")])
-        def fi(label,name,step="0.01"):
-            return '<div><label>'+label+'</label><input name="'+name+'" type="number" step="'+step+'" value="'+str(s.get(name,"") or "")+'"></div>'
-        html=('<h1>'+("Edytuj składnik" if sid else "Nowy składnik")+'</h1><div class="card"><form method="POST">'
-            '<label>Nazwa</label><input name="nazwa" required value="'+s.get("nazwa","")+'">'
-            '<div class="g2"><div><label>Kategoria</label><select name="kategoria">'+kat_opt+'</select></div>'
-            +fi("Cena PLN/T","cena_pln_t","1")+'</div>'
-            '<h2>Wartości odżywcze (na 1 kg)</h2>'
-            '<div class="g3">'+fi("Białko (%)","bialko_pct")+fi("Energia ME (kcal/kg)","energia_me","1")+fi("Tłuszcz (%)","tluszcz_pct")+'</div>'
-            '<div class="g3">'+fi("Włókno (%)","wlokno_pct")+fi("Wapń Ca (g/kg)","wapn_g_kg")+fi("Fosfor P (g/kg)","fosfor_g_kg")+'</div>'
-            '<div class="g2">'+fi("Lizyna (g/kg)","lizyna_g_kg")+fi("Metionina (g/kg)","metionina_g_kg")+'</div>'
-            '<label>Uwagi</label><textarea name="uwagi" rows="2">'+s.get("uwagi","")+'</textarea>'
-            '<br><button class="btn bp">Zapisz</button><a href="/pasza/skladniki-baza" class="btn bo" style="margin-left:8px">Anuluj</a>'
-            '</form></div>')
-        return R(html,"ana")
-
-
-    # ─── MAGAZYN ─────────────────────────────────────────────────────────────
     @app.route("/magazyn")
     @farm_required
     def magazyn():
@@ -2067,6 +2027,7 @@ def register_routes(app):
             '<a href="/pasza/skladniki-baza" class="btn bo bsm">Baza składników</a>'
             '<a href="/gpio/pwm" class="btn bo bsm">LED PWM</a>'
             '<a href="/pojenie" class="btn bo bsm">Harmonogram pojenia</a>'
+            '<a href="/backup/gdrive" class="btn bo bsm">&#x2601; Backup Google Drive</a>'
             '</div></div>'
         )
 

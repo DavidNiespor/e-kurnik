@@ -1391,40 +1391,65 @@ def magazyn_korekta(sid):
     s = db.execute("SELECT * FROM stan_magazynu WHERE id=? AND gospodarstwo_id=?", (sid, g)).fetchone()
     if not s: db.close(); return redirect("/pasza")
     if request.method == "POST":
-        nowy = float(request.form.get("stan", s["stan"]) or 0)
-        cena = float(request.form.get("cena", s["cena_aktualna"]) or 0)
+        nowy    = float(request.form.get("stan", s["stan"]) or 0)
+        cena    = float(request.form.get("cena", s["cena_aktualna"]) or 0)
+        min_zap = float(request.form.get("min_zapas", s["min_zapas"] or 0) or 0)
         roznica = nowy - float(s["stan"] or 0)
-        db.execute("UPDATE stan_magazynu SET stan=?,cena_aktualna=? WHERE id=?", (nowy, cena, sid))
+        db.execute("UPDATE stan_magazynu SET stan=?,cena_aktualna=?,min_zapas=? WHERE id=?",
+                   (nowy, cena, min_zap, sid))
         if abs(roznica) > 0.01:
             db.execute("INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,cena_jednostkowa,wartosc_total,uwagi) VALUES(?,?,?,?,?,?,?,?,?)",
                 (g, date.today().isoformat(), s["kategoria"], s["nazwa"],
                  abs(roznica), s["jednostka"], cena, abs(roznica)*cena,
                  request.form.get("powod","korekta")))
         db.commit(); db.close()
-        flash("Korekta zapisana: " + s["nazwa"] + " → " + str(nowy) + " " + s["jednostka"])
+        flash("Zapisano: " + s["nazwa"] + " → " + str(nowy) + " " + s["jednostka"])
         return redirect("/pasza")
+    # Znajdź odpowiadający składnik w bazie (do linku edycji analityki)
+    baza = db.execute(
+        "SELECT id FROM skladniki_baza WHERE LOWER(TRIM(nazwa))=LOWER(TRIM(?))",
+        (s["nazwa"],)).fetchone()
     db.close()
+    link_analityka = (
+        "<a href='/pasza/skladnik-baza/" + str(baza["id"]) + "/edytuj' class='btn bo bsm'>"
+        "Edytuj wartości analityczne →</a>"
+        if baza else
+        "<a href='/pasza/skladniki-baza' class='btn bo bsm'>Baza składników →</a>"
+    )
     html = (
-        "<h1>Korekta stanu: " + s["nazwa"] + "</h1>"
+        "<h1>Edycja: " + s["nazwa"] + "</h1>"
         "<div class='card'><form method='POST'>"
-        "<div class='al alw'>Aktualny stan w systemie: <b>" + str(round(float(s["stan"]),1)) + " " + s["jednostka"] + "</b><br>"
-        "Wpisz stan rzeczywisty po przeliczeniu. Różnica zostanie zapisana w wydatkach.</div>"
-        "<div class='g2' style='margin-top:12px'>"
-        "<div><label>Stan rzeczywisty (" + s["jednostka"] + ")</label>"
-        "<input name='stan' type='number' step='0.1' value='" + str(round(float(s["stan"]),1)) + "' required style='font-size:22px;text-align:center'></div>"
-        "<div><label>Cena aktualna (zł/kg)</label>"
-        "<input name='cena' type='number' step='0.01' value='" + str(round(float(s["cena_aktualna"]),2)) + "'></div>"
+        "<div class='al alw' style='margin-bottom:12px'>"
+        "Stan w systemie: <b>" + str(round(float(s["stan"]),1)) + " " + s["jednostka"] + "</b>"
         "</div>"
-        "<label style='margin-top:10px'>Powód korekty</label>"
+        "<div class='g3'>"
+        "<div><label>Stan rzeczywisty (" + s["jednostka"] + ")</label>"
+        "<input name='stan' type='number' step='0.1'"
+        " value='" + str(round(float(s["stan"]),1)) + "' required"
+        " style='font-size:22px;text-align:center'></div>"
+        "<div><label>Cena (zł/kg)</label>"
+        "<input name='cena' type='number' step='0.01'"
+        " value='" + str(round(float(s["cena_aktualna"] or 0),2)) + "'></div>"
+        "<div><label>Min. zapas (" + s["jednostka"] + ")</label>"
+        "<input name='min_zapas' type='number' step='1'"
+        " value='" + str(round(float(s["min_zapas"] or 0),0)) + "' placeholder='0'></div>"
+        "</div>"
+        "<label style='margin-top:10px'>Powód korekty stanu</label>"
         "<select name='powod'>"
-        "<option value='inwentaryzacja'>Inwentaryzacja — przeliczenie ręczne</option>"
-        "<option value='ubytki naturalne'>Ubytki naturalne (wilgoć, rozsyp)</option>"
-        "<option value='korekta pomyłki'>Korekta wcześniejszej pomyłki</option>"
+        "<option value='inwentaryzacja'>Inwentaryzacja</option>"
+        "<option value='ubytki naturalne'>Ubytki naturalne</option>"
+        "<option value='korekta pomylki'>Korekta pomyłki</option>"
         "<option value='dosypanie bez paragonu'>Dosypanie bez paragonu</option>"
         "</select>"
-        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz korektę</button>"
+        "<br><button class='btn bp' style='margin-top:12px;width:100%;padding:12px'>Zapisz</button>"
         "<a href='/pasza' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
         "</form></div>"
+        "<div class='card' style='margin-top:8px'>"
+        "<b style='font-size:13px'>Wartości analityczne</b>"
+        "<p style='font-size:13px;color:#888;margin:6px 0'>"
+        "Białko, energia, minerały — edytuj w bazie składników.</p>"
+        + link_analityka +
+        "</div>"
     )
     return R(html, "pasza")
 
