@@ -79,8 +79,21 @@ def api_call(access_token, path, method="GET", body=None):
 
 
 def get_channels(access_token):
-    """Pobiera listę kanałów (przekaźniki, sensory)."""
-    return api_call(access_token, "/channels?include=state,iodevice")
+    """Pobiera wszystkie kanaly przez paginacje."""
+    all_ch = []
+    page = 1
+    while True:
+        result = api_call(access_token,
+            f"/channels?include=state,iodevice&limit=100&page={page}")
+        if isinstance(result, dict) and "error" in result:
+            return result
+        if not isinstance(result, list):
+            break
+        all_ch.extend(result)
+        if len(result) < 100:
+            break
+        page += 1
+    return all_ch
 
 
 def set_channel_state(access_token, channel_id, state_on: bool):
@@ -295,7 +308,7 @@ def register_supla_oauth_routes(app):
 
         # Tabela kanałów z Supla
         ch_rows = ""
-        for ch in supla_channels[:20]:
+        for ch in supla_channels:
             fn = ch.get("function",{}).get("name","") or ch.get("type","")
             state = ch.get("state",{}) or {}
             on = state.get("on", state.get("hi", state.get("connected", False)))
