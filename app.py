@@ -695,20 +695,20 @@ def dashboard():
         oc  = ("tR(" + str(did) + ",'" + str(kan) + "'," + ns + ")" if (ok and did and kan)
                else "window.location='/sterowanie'")
         return (
-            "<div style='border:2px solid " + bc + ";border-radius:12px;padding:12px 6px;"
+            "<div style='border:2px solid " + bc + ";border-radius:10px;padding:10px 4px;"
             "text-align:center;background:" + bg + ";cursor:pointer;transition:all .15s;"
-            "touch-action:manipulation' onclick=\"" + oc + "\">"
-            "<div style='font-size:24px;line-height:1'>" + fico + "</div>"
-            "<div style='font-size:11px;font-weight:600;margin-top:5px;color:#2c2c2a;line-height:1.3'>" + flabel + "</div>"
-            "<div style='font-size:10px;margin-top:3px'>" + dot + "</div>"
+            "touch-action:manipulation;min-width:0;overflow:hidden' onclick=\"" + oc + "\">"
+            "<div style='font-size:20px;line-height:1'>" + fico + "</div>"
+            "<div style='font-size:10px;font-weight:600;margin-top:4px;color:#2c2c2a;line-height:1.2;word-break:break-word'>" + flabel + "</div>"
+            "<div style='font-size:9px;margin-top:2px'>" + dot + "</div>"
             "</div>"
         )
 
     kafelki_ster = "".join(_kaf(*ch) for ch in FIXED_CH)
     zuzycia_kaf = (
-        "<div style='border:2px solid #e0ddd4;border-radius:12px;padding:12px 6px;background:#fff'>"
-        "<div style='font-size:24px;text-align:center'>📊</div>"
-        "<div style='font-size:11px;font-weight:600;text-align:center;margin-top:5px;color:#2c2c2a'>Zużycia dziś</div>"
+        "<div style='border:2px solid #e0ddd4;border-radius:10px;padding:10px 4px;background:#fff;min-width:0;overflow:hidden'>"
+        "<div style='font-size:20px;text-align:center'>📊</div>"
+        "<div style='font-size:10px;font-weight:600;text-align:center;margin-top:4px;color:#2c2c2a'>Zużycia dziś</div>"
         "<div style='margin-top:6px;font-size:11px'>"
         "<div style='display:flex;justify-content:space-between;padding:2px'><span>💧</span><b>" + str(round(woda_dzis,1)) + " L</b></div>"
         "<div style='display:flex;justify-content:space-between;padding:2px'><span>🌾</span><b>" + str(round(pasza_dzis,1)) + " kg</b></div>"
@@ -718,11 +718,14 @@ def dashboard():
 
     sterowanie_html = (
         "<div class='card' style='margin-bottom:12px'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>"
         "<b>Sterowanie</b>"
         "<a href='/sterowanie' style='font-size:12px;color:#534AB7'>Konfiguruj →</a>"
         "</div>"
-        "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:8px'>"
+        "<style>.ster-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}"
+        "@media(max-width:720px){.ster-grid{grid-template-columns:repeat(4,1fr)}}"
+        "@media(max-width:480px){.ster-grid{grid-template-columns:repeat(4,1fr)}}</style>"
+        "<div class='ster-grid'>"
         + kafelki_ster + zuzycia_kaf +
         "</div>"
         "<script>function tR(d,c,s){"
@@ -1096,123 +1099,150 @@ def wydatki_dodaj():
     prefill_kat   = request.args.get("kategoria","Zboże/pasza")
 
     if request.method == "POST":
-        kat  = request.form.get("kategoria","Inne")
-        naz  = request.form.get("nazwa","")
-        il   = float(request.form.get("ilosc",0) or 0)
-        jedn = request.form.get("jednostka","szt")
-        cj   = float(request.form.get("cena_jednostkowa",0) or 0)
-        tot  = round(il*cj,4)
         db = get_db()
-        db.execute("INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,cena_jednostkowa,wartosc_total,dostawca,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (g, request.form.get("data",date.today().isoformat()), kat, naz, il, jedn, cj, tot,
-             request.form.get("dostawca",""), request.form.get("uwagi","")))
-        # Aktualizuj magazyn pasz/suplementów
-        if kat in ("Zboże/pasza","Witaminy/suplementy") and naz and il > 0:
-            ex = db.execute("SELECT id FROM stan_magazynu WHERE gospodarstwo_id=? AND nazwa=? AND kategoria=?", (g,naz,kat)).fetchone()
-            if ex:
-                db.execute("UPDATE stan_magazynu SET stan=stan+?,cena_aktualna=? WHERE id=?", (il,cj,ex["id"]))
-            else:
-                db.execute("INSERT INTO stan_magazynu(gospodarstwo_id,kategoria,nazwa,jednostka,stan,cena_aktualna) VALUES(?,?,?,?,?,?)",
-                           (g,kat,naz,jedn,il,cj))
-            # Zaktualizuj też cenę w bazie składników (PLN/T) jeśli cena znana
-            if cj > 0:
-                cena_t = round(cj * 1000, 2)  # zł/kg → PLN/T
-                db.execute("UPDATE skladniki_baza SET cena_pln_t=? WHERE LOWER(TRIM(nazwa))=LOWER(TRIM(?))",
-                           (cena_t, naz))
+        data_w   = request.form.get("data", date.today().isoformat())
+        dostawca = request.form.get("dostawca","")
+        uwagi_gl = request.form.get("uwagi","")
+        i = 0; zapisano = 0
+        while i <= 20:
+            naz = request.form.get("naz_"+str(i),"").strip()
+            if not naz and i > 0: break
+            if naz:
+                kat    = request.form.get("kat_"+str(i),"Inne")
+                il     = float(request.form.get("il_"+str(i),0) or 0)
+                jedn   = request.form.get("jedn_"+str(i),"kg")
+                tryb_c = request.form.get("tryb_c_"+str(i),"za_kg")
+                cena_w = float(request.form.get("cena_"+str(i),0) or 0)
+                if tryb_c == "za_t":
+                    cj = round(cena_w / 1000, 6)
+                elif tryb_c == "za_calosc":
+                    cj = round(cena_w / il, 6) if il > 0 else 0
+                else:
+                    cj = cena_w
+                tot = round(il * cj, 4)
+                db.execute(
+                    "INSERT INTO wydatki(gospodarstwo_id,data,kategoria,nazwa,ilosc,jednostka,"
+                    "cena_jednostkowa,wartosc_total,dostawca,uwagi) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (g, data_w, kat, naz, il, jedn, cj, tot, dostawca, uwagi_gl))
+                if kat in ("Zboże/pasza","Witaminy/suplementy") and il > 0:
+                    ex = db.execute(
+                        "SELECT id FROM stan_magazynu WHERE gospodarstwo_id=? AND nazwa=? AND kategoria=?",
+                        (g,naz,kat)).fetchone()
+                    if ex:
+                        db.execute("UPDATE stan_magazynu SET stan=stan+?,cena_aktualna=? WHERE id=?", (il,cj,ex["id"]))
+                    else:
+                        db.execute(
+                            "INSERT INTO stan_magazynu(gospodarstwo_id,kategoria,nazwa,jednostka,stan,cena_aktualna)"
+                            " VALUES(?,?,?,?,?,?)", (g,kat,naz,jedn,il,cj))
+                    if cj > 0:
+                        db.execute(
+                            "UPDATE skladniki_baza SET cena_pln_t=? WHERE LOWER(TRIM(nazwa))=LOWER(TRIM(?))",
+                            (round(cj*1000,2), naz))
+                zapisano += 1
+            i += 1
         db.commit(); db.close()
-        flash("Wydatek zapisany" + (f" — cena {naz}: {round(cj,2)} zł/kg" if cj > 0 and naz else "") + ".")
+        flash("Zapisano " + str(zapisano) + " pozycji.")
         return redirect(request.form.get("next","/wydatki"))
 
-    kat_opt = "".join(
-        '<option value="' + k + '" ' + ('selected' if k==prefill_kat else '') + '>' + k + '</option>'
-        for k in KATEGORIE)
+    import json as _j
+    kat_json = _j.dumps(KATEGORIE)
+    pn = prefill_nazwa.replace('"','').replace("'","")
+    pk = prefill_kat.replace('"','').replace("'","")
+    nxt = request.args.get("next","/wydatki")
 
-    js = """
-<script>
-function calc(){
-  var il=parseFloat(document.getElementById('il').value)||0,
-      cj=parseFloat(document.getElementById('cj').value)||0;
-  document.getElementById('tot').textContent=(il*cj).toFixed(2)+' zł';
+    js = ("""<script>
+var _sc=null,ri=0;
+var KATS=__KATS__;
+var PFN="__PFN__",PFK="__PFK__";
+function addRow(pn,pk,pc){
+  pn=pn!==undefined?pn:PFN; pk=pk!==undefined?pk:PFK; pc=pc||0;
+  var i=ri++;
+  var kopts=KATS.map(function(k){return '<option value="'+k+'"'+(k===pk?' selected':'')+'>'+k+'</option>';}).join('');
+  var d=document.createElement('div');
+  d.id='wr'+i;
+  d.style.cssText='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 130px 90px 30px;gap:6px;align-items:start;margin-bottom:6px;padding:6px;background:#fafaf8;border-radius:8px';
+  var inp_naz='<div style="position:relative"><input name="naz_'+i+'" autocomplete="off" required placeholder="Pszenica..." style="width:100%" oninput="sug(this,'+i+')" onblur="setTimeout(function(){hsg('+i+')},200)"><div id="sg'+i+'" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #d3d1c7;border-radius:0 0 8px 8px;z-index:200;max-height:160px;overflow-y:auto"></div></div>';
+  var inp_kat='<select name="kat_'+i+'">'+kopts+'</select>';
+  var inp_il='<input name="il_'+i+'" type="number" step="0.01" min="0" placeholder="0" style="text-align:center" oninput="rc('+i+')">';
+  var inp_jedn='<select name="jedn_'+i+'"><option value="kg">kg</option><option value="szt">szt</option><option value="l">l</option><option value="op">op.</option></select>';
+  var inp_cena='<div style="display:flex;gap:3px;align-items:center"><input name="cena_'+i+'" type="number" step="0.01" min="0" placeholder="0.00" style="flex:1;min-width:0;text-align:right" oninput="rc('+i+')"><span id="cl'+i+'" style="font-size:10px;color:#888;white-space:nowrap">zł/kg</span></div>';
+  var inp_tryb='<div><select name="tryb_c_'+i+'" onchange="ot('+i+')" style="font-size:11px"><option value="za_kg">zł/kg</option><option value="za_t">zł/T</option><option value="za_calosc">całość</option></select><div id="rt'+i+'" style="font-size:11px;color:#3B6D11;font-weight:600;text-align:center;margin-top:2px">0.00 zł</div></div>';
+  var btn_del='<button type="button" onclick="document.getElementById(\'wr'+i+'\').remove();cg()" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:18px;line-height:1">✕</button>';
+  d.innerHTML=inp_naz+inp_kat+inp_il+inp_jedn+inp_cena+inp_tryb+btn_del;
+  document.getElementById('wyd-rows').appendChild(d);
+  if(pc>0){d.querySelector('[name="cena_'+i+'"]').value=pc;rc(i);}
 }
-var _sc=null;
-function szukajN(q){
-  if(q.length<2){document.getElementById('wyd-sug').style.display='none';return;}
-  if(!_sc){fetch('/api/wszystkie-skladniki').then(r=>r.json()).then(d=>{_sc=d;_show(q,d);});return;}
-  _show(q,_sc);
+function ot(i){
+  var t=document.querySelector('[name="tryb_c_'+i+'"]').value;
+  document.getElementById('cl'+i).textContent=t==='za_kg'?'zł/kg':t==='za_t'?'zł/T':'zł tot';rc(i);
 }
-function _show(q,data){
-  var f=data.filter(d=>d.nazwa.toLowerCase().includes(q.toLowerCase())).slice(0,8);
-  var el=document.getElementById('wyd-sug');
-  if(!f.length){el.style.display='none';return;}
+function rc(i){
+  var il=parseFloat(document.querySelector('[name="il_'+i+'"]').value)||0;
+  var c=parseFloat(document.querySelector('[name="cena_'+i+'"]').value)||0;
+  var t=document.querySelector('[name="tryb_c_'+i+'"]').value;
+  var cj=t==='za_kg'?c:t==='za_t'?c/1000:il>0?c/il:0;
+  var el=document.getElementById('rt'+i);if(el)el.textContent=(il*cj).toFixed(2)+' zł';cg();
+}
+function cg(){
+  var s=0;document.querySelectorAll('[id^="rt"]').forEach(function(e){s+=parseFloat(e.textContent)||0;});
+  document.getElementById('grand-tot').textContent=s.toFixed(2)+' zł';
+}
+function sug(inp,i){
+  var q=inp.value;if(q.length<2){hsg(i);return;}
+  if(!_sc){fetch('/api/wszystkie-skladniki').then(r=>r.json()).then(function(d){_sc=d;_sh(q,i,d);});return;}
+  _sh(q,i,_sc);
+}
+function _sh(q,i,data){
+  var f=data.filter(function(d){return d.nazwa.toLowerCase().includes(q.toLowerCase());}).slice(0,8);
+  var el=document.getElementById('sg'+i);if(!f.length){el.style.display='none';return;}
   el.innerHTML=f.map(function(d){
-    return '<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0ede4" onclick="wybN(this)" '
-      +'data-nazwa="'+d.nazwa+'" data-kat="'+d.kategoria+'" data-cena="'+d.cena+'">'
-      +'<b>'+d.nazwa+'</b>'
-      +'<span style="color:#888;font-size:12px;margin-left:6px">('+d.kategoria+')</span>'
-      +(d.cena>0?'<span style="float:right;color:#534AB7">'+d.cena+' zł/kg</span>':'')
-      +'</div>';
-  }).join('');
-  el.style.display='block';
+    return '<div style="padding:7px 12px;cursor:pointer;border-bottom:1px solid #f0ede4" onmousedown="pk('+i+',this)" data-n="'+d.nazwa+'" data-k="'+d.kategoria+'" data-c="'+d.cena+'"><b>'+d.nazwa+'</b> <span style="color:#888;font-size:12px">('+d.kategoria+')</span>'+(d.cena>0?' <span style="float:right;color:#534AB7">'+d.cena+' zł/kg</span>':'')+'</div>';
+  }).join('');el.style.display='block';
 }
-function wybN(el){
-  var nazwa=el.dataset.nazwa, kat=el.dataset.kat, cena=parseFloat(el.dataset.cena)||0;
-  document.getElementById('wyd-n').value=nazwa;
-  document.getElementById('wyd-sug').style.display='none';
-  var sel=document.getElementById('kat-sel');
-  if(kat==='zboze'||kat==='bialkowe') sel.value='Zboże/pasza';
-  else if(['premiks','mineralne','naturalny_dodatek'].includes(kat)) sel.value='Witaminy/suplementy';
-  if(cena>0){document.getElementById('cj').value=cena;calc();}
-  fetch('/api/skladnik-info?nazwa='+encodeURIComponent(nazwa))
-    .then(r=>r.json()).then(function(info){
-      var ib=document.getElementById('info-box');
-      if(info.info){ib.textContent=info.info;ib.style.display='block';}
-      else{ib.style.display='none';}
-    });
+function pk(i,el){
+  var naz=el.dataset.n,kat=el.dataset.k,c=parseFloat(el.dataset.c)||0;
+  document.querySelector('[name="naz_'+i+'"]').value=naz;hsg(i);
+  var map={zboze:'Zboże/pasza',bialkowe:'Zboże/pasza',premiks:'Witaminy/suplementy',mineralne:'Witaminy/suplementy',naturalny_dodatek:'Witaminy/suplementy'};
+  var mk=map[kat]||kat;
+  var sel=document.querySelector('[name="kat_'+i+'"]');
+  for(var o of sel.options){if(o.value===mk){o.selected=true;break;}}
+  if(c>0){document.querySelector('[name="cena_'+i+'"]').value=c;rc(i);}
 }
-document.addEventListener('click',function(e){
-  if(!e.target.closest('#wyd-sug')&&!e.target.closest('#wyd-n'))
-    document.getElementById('wyd-sug').style.display='none';
-});
+function hsg(i){var e=document.getElementById('sg'+i);if(e)e.style.display='none';}
+document.addEventListener('DOMContentLoaded',function(){addRow(PFN,PFK,0);});
 </script>"""
+    .replace("__KATS__", kat_json)
+    .replace("__PFN__", pn)
+    .replace("__PFK__", pk)
+    )
 
     html = (
-        '<h1>Dodaj wydatek</h1>'
-        '<div class="card"><form method="POST">'
-        '<input type="hidden" name="next" value="' + request.args.get("next","/wydatki") + '">'
-        '<div class="g2">'
-        '<div><label>Data</label><input name="data" type="date" value="' + date.today().isoformat() + '"></div>'
-        '<div><label>Kategoria</label><select name="kategoria" id="kat-sel">' + kat_opt + '</select></div>'
-        '</div>'
-        '<label>Nazwa składnika / produktu</label>'
-        '<div style="position:relative">'
-        '<input name="nazwa" id="wyd-n" required autocomplete="off"'
-        ' value="' + prefill_nazwa + '"'
-        ' placeholder="Zacznij pisać: Pszenica, Kukurydza, Dolmix..."'
-        ' oninput="szukajN(this.value)">'
-        '<div id="wyd-sug" style="display:none;position:absolute;top:100%;left:0;right:0;'
-        'background:#fff;border:1px solid #d3d1c7;border-radius:0 0 8px 8px;'
-        'z-index:100;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">'
-        '</div></div>'
-        '<div id="info-box" style="display:none;background:#EEEDFE;border-radius:6px;'
-        'padding:6px 12px;font-size:12px;color:#3C3489;margin-top:4px"></div>'
-        '<div class="g3" style="margin-top:8px">'
-        '<div><label>Ilość</label><input name="ilosc" type="number" step="0.01" id="il" oninput="calc()"></div>'
-        '<div><label>Jednostka</label><select name="jednostka">'
-        '<option value="kg">kg</option><option value="szt">szt</option>'
-        '<option value="l">l</option><option value="op">opak.</option>'
-        '</select></div>'
-        '<div><label>Cena/jedn. (zł)</label><input name="cena_jednostkowa" type="number" step="0.01" id="cj" oninput="calc()"></div>'
-        '</div>'
-        '<div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-top:8px;font-size:14px">'
-        'Łącznie: <b id="tot">0.00 zł</b></div>'
-        '<div class="g2">'
-        '<div><label>Dostawca</label><input name="dostawca"></div>'
-        '<div><label>Uwagi</label><input name="uwagi"></div>'
-        '</div>'
-        '<br><button class="btn bp">Zapisz wydatek</button>'
-        '<a href="/wydatki" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
-        + js
+        "<h1>Dodaj wydatki</h1>"
+        "<div class='card'><form method='POST'>"
+        "<input type='hidden' name='next' value='" + nxt + "'>"
+        "<div class='g3'>"
+        "<div><label>Data</label><input name='data' type='date' value='" + date.today().isoformat() + "'></div>"
+        "<div><label>Dostawca</label><input name='dostawca' placeholder='np. Agroskup'></div>"
+        "<div><label>Uwagi</label><input name='uwagi'></div>"
+        "</div>"
+        "<div style='margin-top:14px'>"
+        "<div style='display:grid;grid-template-columns:2fr 1.4fr 70px 90px 130px 90px 30px;"
+        "gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:#888;padding:0 4px'>"
+        "<div>Nazwa</div><div>Kategoria</div><div>Ilość</div>"
+        "<div>Jedn.</div><div>Cena</div><div>Tryb / kwota</div><div></div>"
+        "</div>"
+        "<div id='wyd-rows'></div>"
+        "</div>"
+        "<div style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center'>"
+        "<button type='button' class='btn bo bsm' onclick='addRow()'>+ Pozycja</button>"
+        "<div style='flex:1;background:#f5f5f0;border-radius:8px;padding:8px 14px;font-size:14px'>"
+        "Łącznie: <b id='grand-tot'>0.00 zł</b></div>"
+        "</div>"
+        "<br><button class='btn bp' style='margin-top:8px'>Zapisz wszystkie</button>"
+        "<a href='/wydatki' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "</form>"
+        + js +
+        "</div>"
     )
     return R(html, "wyd")
 
