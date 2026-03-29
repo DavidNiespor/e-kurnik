@@ -1870,28 +1870,46 @@ def urzadzenia():
     g = gid()
     db = get_db()
     devs = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    supla = db.execute("SELECT * FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1 ORDER BY nazwa", (g,)).fetchall()
     db.close()
+
+    # Wiersze GPIO/ESP
     w = "".join(
         '<tr>'
         '<td style="font-weight:500">' + d["nazwa"] + '</td>'
         '<td><span class="badge b-blue">' + d["typ"].upper() + '</span></td>'
         '<td><code>' + d["ip"] + ':' + str(d["port"]) + '</code></td>'
-        '<td><span class="badge ' + ('b-green' if d["status"]=="online" else 'b-red') + '">' + d["status"] + '</span></td>'
+        '<td><span class="badge ' + ('b-green' if d["status"]=="online" else 'b-gray') + '">' + d["status"] + '</span></td>'
         '<td class="nowrap">'
         '<a href="/urzadzenia/' + str(d["id"]) + '" class="btn bo bsm">Panel</a> '
         '<a href="/urzadzenia/' + str(d["id"]) + '/ping" class="btn bo bsm">Ping</a>'
         '</td></tr>'
         for d in devs
     )
+
+    # Wiersze Supla
+    ws = "".join(
+        '<tr>'
+        '<td style="font-weight:500">☁ ' + s["nazwa"] + '</td>'
+        '<td><span class="badge b-purple">SUPLA</span></td>'
+        '<td><code>ch:' + str(s["channel_id"] or "—") + '</code></td>'
+        '<td><span class="badge ' + ('b-green' if s["ostatni_stan"] else 'b-gray') + '">' + ('ON' if s["ostatni_stan"] else 'OFF') + '</span></td>'
+        '<td class="nowrap">'
+        '<a href="/supla/' + str(s["id"]) + '/edytuj" class="btn bo bsm">Edytuj</a>'
+        '</td></tr>'
+        for s in supla
+    )
+
     html = (
         '<h1>Urządzenia wykonawcze</h1>'
         '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
-        '<a href="/urzadzenia/dodaj" class="btn bp bsm">+ Dodaj urządzenie</a>'
-        '<a href="/urzadzenia/firmware" class="btn bo bsm">Firmware ESP32</a>'
+        '<a href="/urzadzenia/dodaj" class="btn bp bsm">+ Dodaj GPIO/ESP32</a>'
+        '<a href="/supla/dodaj" class="btn bp bsm">+ Dodaj kanał Supla</a>'
+        '<a href="/supla" class="btn bo bsm">☁ Panel Supla</a>'
         '</div>'
         '<div class="card" style="overflow-x:auto"><table>'
-        '<thead><tr><th>Nazwa</th><th>Typ</th><th>Adres</th><th>Status</th><th></th></tr></thead>'
-        '<tbody>' + (w or '<tr><td colspan=5 style="color:#888;text-align:center;padding:20px">Brak urządzeń</td></tr>') + '</tbody></table></div>'
+        '<thead><tr><th>Nazwa</th><th>Typ</th><th>Kanał/Adres</th><th>Stan</th><th></th></tr></thead>'
+        '<tbody>' + (w + ws or '<tr><td colspan=5 style="color:#888;text-align:center;padding:20px">Brak urządzeń. Dodaj ESP32 lub połącz Supla.</td></tr>') + '</tbody></table></div>'
     )
     return R(html, "urz")
 
