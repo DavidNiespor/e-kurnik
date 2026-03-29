@@ -956,10 +956,20 @@ def register_routes(app):
         g=gid()
         if request.method=="POST":
             db=get_db()
+            uid = request.form.get("urzadzenie_id") or None
+            kanal = request.form.get("kanal","") or None
+            ch_id = int(request.form.get("channel_id",0) or 0)
             db.execute("INSERT INTO supla_config(gospodarstwo_id,nazwa,channel_id,powiazane_urzadzenie_id,powiazany_kanal,aktywny) VALUES(?,?,?,?,?,1)",
-                (g,request.form["nazwa"],int(request.form.get("channel_id",0) or 0),
-                 request.form.get("urzadzenie_id") or None,request.form.get("kanal","") or None))
-            db.commit(); db.close(); flash("Kanał Supla dodany."); return redirect("/supla")
+                (g, request.form["nazwa"], ch_id, uid, kanal))
+            # Zsynchronizuj kanal_sterowanie — ustaw tryb supla dla tego kanału
+            if uid and kanal:
+                ex_ks = db.execute("SELECT id FROM kanal_sterowanie WHERE gospodarstwo_id=? AND urzadzenie_id=? AND kanal=?", (g, uid, kanal)).fetchone()
+                if ex_ks:
+                    db.execute("UPDATE kanal_sterowanie SET tryb='supla',supla_channel_id=? WHERE id=?", (ch_id, ex_ks["id"]))
+                else:
+                    db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,opis,supla_channel_id) VALUES(?,?,?,'supla',?,?)",
+                               (g, uid, kanal, request.form["nazwa"], ch_id))
+            db.commit(); db.close(); flash("Kanal Supla dodany i zmapowany."); return redirect("/supla")
         db=get_db(); urzadz=db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1",(g,)).fetchall(); db.close()
         u_opt='<option value="">— brak —</option>'+"".join(f'<option value="{u["id"]}">{u["nazwa"]}</option>' for u in urzadz)
         k_opt="".join(f'<option value="relay{i}">relay{i}</option>' for i in range(1,5))
@@ -976,11 +986,21 @@ def register_routes(app):
     def supla_edytuj(sid):
         g=gid(); db=get_db()
         if request.method=="POST":
+            uid = request.form.get("urzadzenie_id") or None
+            kanal = request.form.get("kanal","") or None
+            ch_id = int(request.form.get("channel_id",0) or 0)
             db.execute("UPDATE supla_config SET nazwa=?,channel_id=?,powiazane_urzadzenie_id=?,powiazany_kanal=?,aktywny=? WHERE id=? AND gospodarstwo_id=?",
-                (request.form["nazwa"],int(request.form.get("channel_id",0) or 0),
-                 request.form.get("urzadzenie_id") or None,request.form.get("kanal","") or None,
-                 1 if request.form.get("aktywny") else 0,sid,g))
-            db.commit(); db.close(); flash("Zaktualizowano."); return redirect("/supla")
+                (request.form["nazwa"], ch_id, uid, kanal,
+                 1 if request.form.get("aktywny") else 0, sid, g))
+            # Zsynchronizuj kanal_sterowanie
+            if uid and kanal:
+                ex_ks = db.execute("SELECT id FROM kanal_sterowanie WHERE gospodarstwo_id=? AND urzadzenie_id=? AND kanal=?", (g, uid, kanal)).fetchone()
+                if ex_ks:
+                    db.execute("UPDATE kanal_sterowanie SET tryb='supla',supla_channel_id=? WHERE id=?", (ch_id, ex_ks["id"]))
+                else:
+                    db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,opis,supla_channel_id) VALUES(?,?,?,'supla',?,?)",
+                               (g, uid, kanal, request.form["nazwa"], ch_id))
+            db.commit(); db.close(); flash("Zaktualizowano i zsynchronizowano."); return redirect("/supla")
         c=db.execute("SELECT * FROM supla_config WHERE id=? AND gospodarstwo_id=?",(sid,g)).fetchone()
         urzadz=db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1",(g,)).fetchall(); db.close()
         if not c: return redirect("/supla")

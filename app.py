@@ -153,8 +153,10 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
     <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
 
     <div class="ni">
-      <button class="nl {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="ar">&#9660;</span></button>
+      <button class="nl {{ 'on' if p in ['wyd','pasza','woda','stado'] }}">Zasoby <span class="ar">&#9660;</span></button>
       <div class="nd">
+        <a href="/stado" class="{{ 'on' if p=='stado' }}">&#x1F414; Stado</a>
+        <div class="nd-sep"></div>
         <a href="/wydatki" class="{{ 'on' if p=='wyd' }}">&#x1F4B8; Wydatki</a>
         <a href="/pasza" class="{{ 'on' if p=='pasza' }}">&#x1F33E; Pasza</a>
         <a href="/pasza/mieszalnik">&#x2697;&#xFE0F; Mieszalnik</a>
@@ -232,6 +234,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
       <span>&#x1F33E; Zasoby</span><span class="dr-ar">&#9660;</span>
     </div>
     <div class="dr-bd">
+      <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="drClose()">&#x1F414; Stado</a>
       <a href="/wydatki" class="{{ 'on' if p=='wyd' }}" onclick="drClose()">Wydatki</a>
       <a href="/pasza" class="{{ 'on' if p=='pasza' }}" onclick="drClose()">Pasza</a>
       <a href="/pasza/mieszalnik" onclick="drClose()">Mieszalnik</a>
