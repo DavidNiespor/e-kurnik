@@ -149,26 +149,8 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   <span class="nb-farm" title="{{ farm_name }}">{{ farm_name }}</span>
   <div class="nb-links">
     <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
-
-    <div class="ni">
-      <button class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla <span class="ar">&#9660;</span></button>
-      <div class="nd">
-        <a href="/produkcja" class="{{ 'on' if p=='prod' }}">&#x1F95A; Produkcja jaj</a>
-        <a href="/stado" class="{{ 'on' if p=='stado' }}">&#x1F414; Stado</a>
-        <div class="nd-sep"></div>
-        <a href="/dzienne">&#x1F4CB; Czynno&#347;ci dzienne</a>
-      </div>
-    </div>
-
-    <div class="ni">
-      <button class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380; <span class="ar">&#9660;</span></button>
-      <div class="nd">
-        <a href="/sprzedaz" class="{{ 'on' if p=='zam' }}">&#x1F4E6; Sprzeda&#380; i magazyn</a>
-        <div class="nd-sep"></div>
-        <a href="/zamowienia">&#x1F6D2; Zam&#243;wienia</a>
-        <a href="/klienci">&#x1F465; Klienci</a>
-      </div>
-    </div>
+    <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla</a>
+    <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
 
     <div class="ni">
       <button class="nl {{ 'on' if p in ['wyd','pasza','woda'] }}">Zasoby <span class="ar">&#9660;</span></button>
@@ -241,27 +223,9 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 <div class="dr" id="dr">
   <a href="/" class="dr-fl {{ 'on' if p=='dash' }}" onclick="drClose()">&#x1F3E0; Dashboard</a>
 
-  <div class="dr-sec" id="ds-hod">
-    <div class="dr-hd" onclick="drSec('ds-hod')">
-      <span>&#x1F414; Hodowla</span><span class="dr-ar">&#9660;</span>
-    </div>
-    <div class="dr-bd">
-      <a href="/produkcja" class="{{ 'on' if p=='prod' }}" onclick="drClose()">Produkcja jaj</a>
-      <a href="/stado" class="{{ 'on' if p=='stado' }}" onclick="drClose()">Stado</a>
-      <a href="/dzienne" onclick="drClose()">Czynno&#347;ci dzienne</a>
-    </div>
-  </div>
+  <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F414; Hodowla</a>
 
-  <div class="dr-sec" id="ds-spr">
-    <div class="dr-hd" onclick="drSec('ds-spr')">
-      <span>&#x1F4E6; Sprzeda&#380;</span><span class="dr-ar">&#9660;</span>
-    </div>
-    <div class="dr-bd">
-      <a href="/sprzedaz" onclick="drClose()">Sprzeda&#380; i magazyn</a>
-      <a href="/zamowienia" class="{{ 'on' if p=='zam' }}" onclick="drClose()">Zam&#243;wienia</a>
-      <a href="/klienci" onclick="drClose()">Klienci</a>
-    </div>
-  </div>
+  <a href="/sprzedaz" class="dr-fl {{ 'on' if p in ['zam','mag','sprzedaz'] }}" onclick="drClose()">&#x1F4E6; Sprzeda&#380;</a>
 
   <div class="dr-sec" id="ds-zas">
     <div class="dr-hd" onclick="drSec('ds-zas')">
@@ -824,11 +788,24 @@ def dashboard():
         # Formularz 1: Zebrane jaja
         + _jaja_form
 
-        # Link do sprzedaży (formularz jest na /sprzedaz)
-        + '<div class="card"><b>Sprzedaż</b>'
-        + '<p style="font-size:13px;color:#888;margin-top:6px">Formularz sprzedaży, historia i klienci</p>'
-        + '<a href="/sprzedaz" class="btn bp" style="width:100%;margin-top:8px;padding:11px;text-align:center">Przejdź do sprzedaży →</a>'
-        + '</div>'
+        # Formularz 2: Szybka sprzedaż → /sprzedaz
+        + '<div class="card"><b>Sprzedaż — dziś</b>'
+        + '<form method="POST" action="/sprzedaz" style="margin-top:10px">'
+        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
+        + '<label>Sprzedane (szt)</label>'
+        + '<input name="jaja_sprzedane" type="number" min="0" value="0" id="sp_d" oninput="cWd()" style="font-size:18px;text-align:center">'
+        + '<label>Cena/szt (zł)</label>'
+        + '<input name="cena_sprzedazy" type="number" step="0.01" value="' + gs('cena_jajka','1.20') + '" id="cn_d" oninput="cWd()">'
+        + '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
+        + '<label>Klient</label>'
+        + '<select name="klient_id"><option value="">— anonimowa —</option>'
+        + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
+        + '</select>'
+        + '<label>Typ płatności</label>'
+        + '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="nastepnym_razem">Następnym razem</option><option value="z_salda">Z salda</option></select>'
+        + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:11px">Zapisz sprzedaż</button>'
+        + '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
+        + '</form></div>'
 
         # Formularz 3: Pasza + Woda
         + '<div class="card" style="margin-top:4px">'
