@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """sprzedaz_views.py — /sprzedaz: formularz + magazyn + historia + klienci"""
-from datetime import date
+from datetime import date, timedelta
 
 
 def register_sprzedaz(app):
@@ -67,10 +67,20 @@ def register_sprzedaz(app):
                      str(sprzed) + " szt. x " + str(cena) + " zl", nowe))
 
             db.commit(); db.close()
-            flash("Sprzedaz zapisana: " + str(sprzed) + " szt. x " + str(cena) + " zl = " + str(kwota) + " zl")
+            flash("Zapisano: " + str(sprzed) + " szt. x " + str(cena) + " zl = " + str(kwota) + " zl")
             return redirect("/sprzedaz")
 
         # ── GET ───────────────────────────────────────────────────────────
+        # Filtr dat z query params
+        data_od  = request.args.get("od", "")
+        data_do  = request.args.get("do", "")
+        # Domyślnie: bieżący miesiąc
+        if not data_od:
+            dzis = date.today()
+            data_od = dzis.replace(day=1).isoformat()
+        if not data_do:
+            data_do = date.today().isoformat()
+
         db = get_db()
 
         # Stan magazynu
@@ -93,7 +103,7 @@ def register_sprzedaz(app):
             " ORDER BY z.data_dostawy", (g,)).fetchall()
         cena_def = gs("cena_jajka", "1.20")
 
-        # Historia sprzedaży
+        # Historia sprzedaży (filtrowana)
         historia = db.execute("""
             SELECT p.data, p.jaja_sprzedane, p.cena_sprzedazy, p.typ_sprzedazy, p.uwagi,
                    k.id as kid, k.nazwa as kn,
@@ -101,8 +111,23 @@ def register_sprzedaz(app):
             FROM produkcja p
             LEFT JOIN klienci k ON p.klient_id = k.id
             WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane > 0
-            ORDER BY p.data DESC LIMIT 60""", (g,)).fetchall()
+              AND p.data >= ? AND p.data <= ?
+            ORDER BY p.data DESC""", (g, data_od, data_do)).fetchall()
 
+        # Statystyki w zakresie
+        stat_zakres = db.execute(
+            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
+            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as przychod"
+            " FROM produkcja WHERE gospodarstwo_id=?"
+            " AND jaja_sprzedane>0 AND data>=? AND data<=?",
+            (g, data_od, data_do)).fetchone()
+
+        koszty_zakres = db.execute(
+            "SELECT COALESCE(SUM(wartosc_total),0) as koszty"
+            " FROM wydatki WHERE gospodarstwo_id=? AND data>=? AND data<=?",
+            (g, data_od, data_do)).fetchone()
+
+        # Statystyki bieżący miesiąc (do kafelka)
         stat = db.execute(
             "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
             " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as kwota"
@@ -125,7 +150,7 @@ def register_sprzedaz(app):
             GROUP BY k.id ORDER BY ABS(COALESCE(ks.saldo_pln,0)) DESC, k.nazwa""",
             (g, g)).fetchall()
 
-        # Aktywne zamówienia
+        # Aktywne zamówienia do wyświetlenia
         zam_aktywne = db.execute(
             "SELECT z.*, k.nazwa as kn FROM zamowienia z"
             " LEFT JOIN klienci k ON z.klient_id=k.id"
@@ -137,6 +162,9 @@ def register_sprzedaz(app):
         TYP_ICO = {"gotowka": "💵", "przelew": "🏦", "z_salda": "📋", "nastepnym_razem": "⏳"}
         dzis = date.today().isoformat()
         suma_dlug = sum(max(0, float(k["saldo"] or 0)) for k in klienci_saldo)
+        przychod  = round(float(stat_zakres["przychod"]), 2)
+        koszty    = round(float(koszty_zakres["koszty"]), 2)
+        zysk      = round(przychod - koszty, 2)
 
         # ─── 1. FORMULARZ SPRZEDAŻY ───────────────────────────────────────
         kl_opt = "<option value=''>— anonimowa —</option>" + "".join(
@@ -152,7 +180,6 @@ def register_sprzedaz(app):
             "<div class='card' style='margin-bottom:12px'>"
             "<b style='font-size:15px'>Sprzedaj jaja</b>"
             "<form method='POST' action='/sprzedaz' style='margin-top:12px'>"
-
             "<div class='g3'>"
             "<div><label>Sprzedane (szt)</label>"
             "<input name='jaja_sprzedane' type='number' min='0' required"
@@ -164,10 +191,8 @@ def register_sprzedaz(app):
             "<div><label>Data</label>"
             "<input name='data' type='date' value='" + dzis + "'></div>"
             "</div>"
-
             "<div style='background:#f5f5f0;border-radius:8px;padding:8px 12px;"
             "font-size:14px;margin:8px 0'>Wartość: <b id='wartosc'>— zł</b></div>"
-
             "<div class='g2'>"
             "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
             "<div><label>Typ płatności</label>"
@@ -178,14 +203,10 @@ def register_sprzedaz(app):
             "<option value='z_salda'>📋 Z salda</option>"
             "</select></div>"
             "</div>"
-
-            + ("<div><label>Zamówienie</label>"
-               "<select name='zamowienie_id'>" + zam_opt + "</select></div>"
-               if zamow_akt else "<input type='hidden' name='zamowienie_id' value=''>")
-
-            + "<div><label>Uwagi</label>"
+            "<div><label>Zamówienie</label>"
+            "<select name='zamowienie_id'>" + zam_opt + "</select></div>"
+            "<div><label>Uwagi</label>"
             "<input name='uwagi' placeholder='opcjonalnie'></div>"
-
             "<button class='btn bg' style='width:100%;margin-top:12px;padding:12px;font-size:15px'>"
             "Zapisz sprzedaż</button>"
             "</form>"
@@ -220,30 +241,36 @@ def register_sprzedaz(app):
         # ─── 3. ZAMÓWIENIA DO REALIZACJI ──────────────────────────────────
         zam_html = ""
         for z in zam_aktywne:
-            alarm = " ⚠️" if z["data_dostawy"] == dzis else ""
+            alarm = " ⚠️" if z["data_dostawy"] <= dzis else ""
             kwota_z = round(z["ilosc"] * (z["cena_za_szt"] or 0), 2)
+            dni_do = (date.fromisoformat(z["data_dostawy"]) - date.today()).days
+            dni_txt = ("dziś" if dni_do == 0 else
+                       "jutro" if dni_do == 1 else
+                       "za " + str(dni_do) + " dni" if dni_do > 0 else
+                       str(-dni_do) + " dni temu")
             zam_html += (
                 "<tr>"
                 "<td style='white-space:nowrap'>" + z["data_dostawy"] + alarm + "</td>"
+                "<td style='font-size:12px;color:#888'>" + dni_txt + "</td>"
                 "<td style='font-weight:600'>" + str(z["ilosc"]) + " szt.</td>"
                 "<td>" + (z["kn"] or "—") + "</td>"
                 "<td>" + str(kwota_z) + " zł</td>"
                 "<td class='nowrap'>"
                 "<a href='/zamowienia/" + str(z["id"]) + "/status/dostarczone' class='btn bg bsm'>✓ Dostarcz</a> "
                 "<a href='/zamowienia/" + str(z["id"]) + "/status/anulowane' class='btn br bsm'"
-                " onclick=\"return confirm('Anuloac?')\">✕</a>"
+                " onclick=\"return confirm('Anulować?')\">✕</a>"
                 "</td></tr>"
             )
 
         s_zamowienia = (
             "<div class='card' style='margin-bottom:12px'>"
             "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
-            "<b>🛒 Zamówienia do realizacji</b>"
+            "<b>🛒 Zamówienia</b>"
             "<a href='/zamowienia/dodaj' class='btn bp bsm'>+ Nowe</a>"
             "</div>"
             + (
                 "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
-                "<th>Dostawa</th><th>Ilość</th><th>Klient</th><th>Wartość</th><th></th>"
+                "<th>Dostawa</th><th></th><th>Ilość</th><th>Klient</th><th>Wartość</th><th></th>"
                 "</tr></thead><tbody>" + zam_html + "</tbody></table></div>"
                 if zam_html else
                 "<p style='color:#888;font-size:13px;text-align:center;padding:8px'>Brak aktywnych zamówień</p>"
@@ -251,7 +278,30 @@ def register_sprzedaz(app):
             + "</div>"
         )
 
-        # ─── 4. HISTORIA SPRZEDAŻY ────────────────────────────────────────
+        # ─── 4. FILTR + ZYSK/STRATA ───────────────────────────────────────
+        zysk_kol = "#3B6D11" if zysk >= 0 else "#A32D2D"
+        zysk_txt = ("+" if zysk >= 0 else "") + str(zysk) + " zł"
+
+        s_filtr = (
+            "<div class='card' style='margin-bottom:8px'>"
+            "<form method='GET' action='/sprzedaz' style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+            "<div><label style='font-size:12px'>Od</label>"
+            "<input name='od' type='date' value='" + data_od + "' style='font-size:13px'></div>"
+            "<div><label style='font-size:12px'>Do</label>"
+            "<input name='do' type='date' value='" + data_do + "' style='font-size:13px'></div>"
+            "<button class='btn bo bsm'>Filtruj</button>"
+            "<a href='/sprzedaz' class='btn bo bsm'>Reset</a>"
+            "</form>"
+            "<div style='display:flex;gap:16px;margin-top:10px;flex-wrap:wrap'>"
+            "<div style='font-size:13px'>Sprzedano: <b style='color:#3B6D11'>" + str(int(stat_zakres["szt"])) + " szt.</b></div>"
+            "<div style='font-size:13px'>Przychód: <b style='color:#3B6D11'>" + str(przychod) + " zł</b></div>"
+            "<div style='font-size:13px'>Koszty: <b style='color:#A32D2D'>" + str(koszty) + " zł</b></div>"
+            "<div style='font-size:13px;font-weight:600'>Zysk/strata: <b style='color:" + zysk_kol + "'>" + zysk_txt + "</b></div>"
+            "</div>"
+            "</div>"
+        )
+
+        # ─── 5. HISTORIA SPRZEDAŻY ────────────────────────────────────────
         hist_html = ""
         for r in historia:
             klink = ("<a href='#k-" + str(r["kid"]) + "' style='color:#534AB7'>" + r["kn"] + "</a>"
@@ -265,6 +315,7 @@ def register_sprzedaz(app):
                 "<td>" + klink + "</td>"
                 "<td style='font-size:15px'>" + TYP_ICO.get(r["typ_sprzedazy"] or "", "?") + "</td>"
                 "<td style='font-size:11px;color:#888'>" + (r["uwagi"] or "") + "</td>"
+                "<td><a href='/sprzedaz/edytuj/" + r["data"] + "' class='btn bo bsm' style='font-size:11px'>Edytuj</a></td>"
                 "</tr>"
             )
 
@@ -282,13 +333,13 @@ def register_sprzedaz(app):
             "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
             "<th>Data</th><th style='text-align:center'>Szt</th>"
             "<th style='text-align:right'>Cena</th><th style='text-align:right'>Kwota</th>"
-            "<th>Klient</th><th>Płat.</th><th>Uwagi</th>"
+            "<th>Klient</th><th>Płat.</th><th>Uwagi</th><th></th>"
             "</tr></thead><tbody>"
-            + (hist_html or "<tr><td colspan=7 style='color:#888;text-align:center;padding:16px'>Brak sprzedaży</td></tr>")
+            + (hist_html or "<tr><td colspan=8 style='color:#888;text-align:center;padding:16px'>Brak sprzedaży w tym zakresie</td></tr>")
             + "</tbody></table></div></div>"
         )
 
-        # ─── 5. KLIENCI ───────────────────────────────────────────────────
+        # ─── 6. KLIENCI ───────────────────────────────────────────────────
         kl_html = ""
         for k in klienci_saldo:
             saldo = float(k["saldo"] or 0)
@@ -335,7 +386,7 @@ def register_sprzedaz(app):
                     "<div style='margin-top:8px;padding-top:8px;border-top:1px solid #f0ede4'>"
                     + ost_html + "</div>"
                     if ost_html else
-                    "<div style='font-size:11px;color:#ccc;margin-top:6px'>Brak transakcji sprzedaży</div>"
+                    "<div style='font-size:11px;color:#ccc;margin-top:6px'>Brak transakcji w tym zakresie</div>"
                 )
                 + "</div>"
             )
@@ -356,8 +407,87 @@ def register_sprzedaz(app):
             + s_formularz
             + s_magazyn
             + s_zamowienia
+            + s_filtr
             + s_historia
             + s_klienci
+        )
+        return R(html, "zam")
+
+    # ── Edycja wpisu sprzedaży ────────────────────────────────────────────
+    @app.route("/sprzedaz/edytuj/<data>", methods=["GET", "POST"])
+    @farm_required
+    def sprzedaz_edytuj(data):
+        g = gid(); db = get_db()
+        r = db.execute(
+            "SELECT p.*, k.nazwa as kn FROM produkcja p"
+            " LEFT JOIN klienci k ON p.klient_id=k.id"
+            " WHERE p.gospodarstwo_id=? AND p.data=?", (g, data)).fetchone()
+        if not r: db.close(); flash("Nie znaleziono wpisu."); return redirect("/sprzedaz")
+
+        klienci = db.execute(
+            "SELECT id, nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+        zamow = db.execute(
+            "SELECT z.id, z.data_dostawy, z.ilosc, k.nazwa as kn FROM zamowienia z"
+            " LEFT JOIN klienci k ON z.klient_id=k.id"
+            " WHERE z.gospodarstwo_id=? AND (z.status IN ('nowe','potwierdzone')"
+            " OR z.id=?)"
+            " ORDER BY z.data_dostawy", (g, r["zamowienie_id"] or 0)).fetchall()
+
+        if request.method == "POST":
+            sprzed = int(request.form.get("jaja_sprzedane", 0) or 0)
+            cena   = float(request.form.get("cena_sprzedazy", 0) or 0)
+            kid    = request.form.get("klient_id") or None
+            zid    = request.form.get("zamowienie_id") or None
+            typ    = request.form.get("typ_sprzedazy", "gotowka")
+            uwagi  = request.form.get("uwagi", "")
+            db.execute(
+                "UPDATE produkcja SET jaja_sprzedane=?,cena_sprzedazy=?,"
+                "klient_id=?,zamowienie_id=?,typ_sprzedazy=?,uwagi=? WHERE gospodarstwo_id=? AND data=?",
+                (sprzed, cena, kid, zid, typ, uwagi, g, data))
+            db.commit(); db.close()
+            flash("Zaktualizowano sprzedaż: " + data)
+            return redirect("/sprzedaz")
+
+        db.close()
+        kl_opt = "<option value=''>— anonimowa —</option>" + "".join(
+            "<option value='" + str(k["id"]) + "'"
+            + (" selected" if r["klient_id"] == k["id"] else "") + ">"
+            + k["nazwa"] + "</option>" for k in klienci)
+        zam_opt = "<option value=''>— bez zamówienia —</option>" + "".join(
+            "<option value='" + str(z["id"]) + "'"
+            + (" selected" if r["zamowienie_id"] == z["id"] else "") + ">"
+            + z["data_dostawy"] + " · " + (z["kn"] or "?") + " · " + str(z["ilosc"]) + " szt."
+            + "</option>" for z in zamow)
+        TYP = [("gotowka","💵 Gotówka"),("przelew","🏦 Przelew"),
+               ("nastepnym_razem","⏳ Następnym razem"),("z_salda","📋 Z salda")]
+        typ_opt = "".join(
+            "<option value='" + v + "'" + (" selected" if r["typ_sprzedazy"]==v else "") + ">" + l + "</option>"
+            for v,l in TYP)
+
+        html = (
+            "<h1>Edycja sprzedaży — " + data + "</h1>"
+            "<div class='card'><form method='POST'>"
+            "<div class='g3'>"
+            "<div><label>Sprzedane (szt)</label>"
+            "<input name='jaja_sprzedane' type='number' min='0' required"
+            " value='" + str(r["jaja_sprzedane"]) + "'"
+            " style='font-size:20px;text-align:center'></div>"
+            "<div><label>Cena/szt (zł)</label>"
+            "<input name='cena_sprzedazy' type='number' step='0.01' min='0'"
+            " value='" + str(r["cena_sprzedazy"] or "") + "'"
+            " style='font-size:20px;text-align:center'></div>"
+            "<div><label>Data</label>"
+            "<input type='text' value='" + data + "' disabled style='background:#f5f5f0'></div>"
+            "</div>"
+            "<div class='g2'>"
+            "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
+            "<div><label>Typ płatności</label><select name='typ_sprzedazy'>" + typ_opt + "</select></div>"
+            "</div>"
+            "<div><label>Zamówienie</label><select name='zamowienie_id'>" + zam_opt + "</select></div>"
+            "<div><label>Uwagi</label><input name='uwagi' value='" + (r["uwagi"] or "") + "'></div>"
+            "<br><button class='btn bp' style='margin-top:12px'>Zapisz</button>"
+            "<a href='/sprzedaz' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+            "</form></div>"
         )
         return R(html, "zam")
 

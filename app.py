@@ -809,24 +809,34 @@ def dashboard():
         # Formularz 1: Zebrane jaja
         + _jaja_form
 
-        # Formularz 2: Szybka sprzedaż → /sprzedaz
-        + '<div class="card"><b>Sprzedaż — dziś</b>'
-        + '<form method="POST" action="/sprzedaz" style="margin-top:10px">'
-        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-        + '<label>Sprzedane (szt)</label>'
-        + '<input name="jaja_sprzedane" type="number" min="0" value="0" id="sp_d" oninput="cWd()" style="font-size:18px;text-align:center">'
-        + '<label>Cena/szt (zł)</label>'
-        + '<input name="cena_sprzedazy" type="number" step="0.01" value="' + gs('cena_jajka','1.20') + '" id="cn_d" oninput="cWd()">'
-        + '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
-        + '<label>Klient</label>'
-        + '<select name="klient_id"><option value="">— anonimowa —</option>'
-        + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
-        + '</select>'
-        + '<label>Typ płatności</label>'
-        + '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="nastepnym_razem">Następnym razem</option><option value="z_salda">Z salda</option></select>'
-        + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:11px">Zapisz sprzedaż</button>'
-        + '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
-        + '</form></div>'
+        # Formularz 2: Szybka sprzedaż → /sprzedaz (z zamówieniami)
+        + (lambda: (
+            '<div class="card"><b>Sprzedaż — dziś</b>'
+            '<form method="POST" action="/sprzedaz" style="margin-top:10px">'
+            '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
+            '<label>Sprzedane (szt)</label>'
+            '<input name="jaja_sprzedane" type="number" min="0" value="0" id="sp_d" oninput="cWd()" style="font-size:18px;text-align:center">'
+            '<label>Cena/szt (zł)</label>'
+            '<input name="cena_sprzedazy" type="number" step="0.01" value="' + gs('cena_jajka','1.20') + '" id="cn_d" oninput="cWd()">'
+            '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
+            '<label>Klient</label>'
+            '<select name="klient_id"><option value="">— anonimowa —</option>'
+            + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
+            + '</select>'
+            '<label>Typ płatności</label>'
+            '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="nastepnym_razem">Następnym razem</option><option value="z_salda">Z salda</option></select>'
+            '<label>Zamówienie</label>'
+            '<select name="zamowienie_id"><option value="">— bez zamówienia —</option>'
+            + "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + ' · ' + (z["kn"] or "?") + ' · ' + str(z["ilosc"]) + ' szt.</option>' for z in zamow_aktywne)
+            + '</select>'
+            + ('<div style="background:#fff3cd;border-radius:6px;padding:6px 10px;font-size:12px;margin:4px 0">📦 '
+               + str(len(zamow_aktywne)) + ' zamówień do realizacji'
+               + (' — <b>dziś: ' + str(sum(1 for z in zamow_aktywne if z["data_dostawy"] <= date.today().isoformat())) + '</b>' if any(z["data_dostawy"] <= date.today().isoformat() for z in zamow_aktywne) else "")
+               + '</div>' if zamow_aktywne else "")
+            + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:11px">Zapisz sprzedaż</button>'
+            '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
+            '</form></div>'
+        ))()
 
         # Formularz 3: Pasza + Woda
         + '<div class="card" style="margin-top:4px">'
