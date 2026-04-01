@@ -601,16 +601,20 @@ def _kafelki_czynnosci(g, db_cz=None):
 @farm_required
 def produkcja_dodaj():
     g = gid()
-    d     = request.form.get("data", date.today().isoformat())
-    jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
-    pasza = float(request.form.get("pasza_wydana_kg", 0) or 0)
+    d    = request.form.get("data", date.today().isoformat())
+    jaja = int(request.form.get("jaja_zebrane", 0) or 0)
     uwagi = request.form.get("uwagi", "")
+    # Pasza — tylko jeśli jawnie podana w formularzu (nie nadpisuj automatycznie)
+    pasza_raw = request.form.get("pasza_wydana_kg", "")
     db = get_db()
-    ex = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, d)).fetchone()
+    ex = db.execute("SELECT id, pasza_wydana_kg FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, d)).fetchone()
     if ex:
+        # Zachowaj istniejącą paszę jeśli nie podano nowej
+        pasza = float(pasza_raw) if pasza_raw.strip() != "" else float(ex["pasza_wydana_kg"] or 0)
         db.execute("UPDATE produkcja SET jaja_zebrane=?, pasza_wydana_kg=?, uwagi=? WHERE id=?",
                    (jaja, pasza, uwagi, ex["id"]))
     else:
+        pasza = float(pasza_raw) if pasza_raw.strip() != "" else 0
         db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,uwagi) VALUES(?,?,?,0,0,?,?)",
                    (g, d, jaja, pasza, uwagi))
     db.commit(); db.close()
@@ -782,7 +786,6 @@ def dashboard():
         + "<div><label>Data</label>"
         + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:13px'></div>"
         + "</div>"
-        + "<input type='hidden' name='pasza_wydana_kg' value='" + str(pdz) + "'>"
         + "<button class='btn bg' style='width:100%;margin-top:10px;padding:11px'>Zapisz</button>"
         + "</form></div>"
     )
