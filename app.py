@@ -848,38 +848,177 @@ def dashboard():
 @app.route("/stado")
 @farm_required
 def stado():
-    g = gid()
-    db = get_db()
-    rows = db.execute("SELECT * FROM stado WHERE gospodarstwo_id=? ORDER BY aktywne DESC, data_dodania DESC", (g,)).fetchall()
+    g = gid(); db = get_db()
+    rows = db.execute(
+        "SELECT * FROM stado WHERE gospodarstwo_id=? ORDER BY aktywne DESC, data_dodania DESC", (g,)).fetchall()
+    # Statystyki ubytków
+    ub_total = db.execute(
+        "SELECT COALESCE(SUM(ilosc),0) as s FROM stado_ubytki WHERE gospodarstwo_id=?", (g,)).fetchone()["s"]
+    ub_by_powod = db.execute(
+        "SELECT powod, COALESCE(SUM(ilosc),0) as s FROM stado_ubytki WHERE gospodarstwo_id=? GROUP BY powod ORDER BY s DESC", (g,)).fetchall()
+    ub_last = db.execute(
+        "SELECT u.*, s.nazwa as sn FROM stado_ubytki u "
+        "LEFT JOIN stado s ON u.stado_id=s.id "
+        "WHERE u.gospodarstwo_id=? ORDER BY u.data DESC, u.id DESC LIMIT 30", (g,)).fetchall()
     db.close()
-    total = sum(r["liczba"] for r in rows if r["aktywne"])
+
+    total    = sum(r["liczba"] for r in rows if r["aktywne"])
+    nioski   = sum(r["liczba"] for r in rows if r["aktywne"] and r["gatunek"]=="nioski")
+    koguty   = sum(r["liczba"] for r in rows if r["aktywne"] and r["gatunek"]=="kogut")
+
+    POWOD = {"padniecie":"🐔 Padnięcie","choroba":"🦠 Choroba","drapieznik":"🦊 Drapieżnik",
+             "sprzedaz":"💰 Sprzedaż żywca","uboj":"🔪 Ubój","inne":"📋 Inne"}
+
+    # Tabela stada
     w = "".join(
-        '<tr>'
-        '<td style="font-weight:500">' + r["nazwa"] + '</td>'
-        '<td><span class="badge b-blue">' + r["gatunek"] + '</span></td>'
-        '<td style="font-weight:500">' + str(r["liczba"]) + '</td>'
-        '<td>' + (r["rasa"] or "—") + '</td>'
-        '<td>' + (r["data_dodania"] or "—") + '</td>'
-        '<td><span class="badge ' + ('b-green' if r["aktywne"] else 'b-gray') + '">' + ('aktywne' if r["aktywne"] else 'nieaktywne') + '</span></td>'
-        '<td class="nowrap">'
-        '<a href="/stado/' + str(r["id"]) + '/ubytki" class="btn br bsm">- Ubytki</a> '
-        '<a href="/stado/' + str(r["id"]) + '/toggle" class="btn bo bsm">Toggle</a>'
-        '</td></tr>'
+        "<tr>"
+        "<td style='font-weight:500'>" + r["nazwa"] + "</td>"
+        "<td><span class='badge b-blue'>" + r["gatunek"] + "</span></td>"
+        "<td style='font-weight:700;font-size:16px;text-align:center'>" + str(r["liczba"]) + "</td>"
+        "<td>" + (r["rasa"] or "—") + "</td>"
+        "<td style='font-size:12px;color:#888'>" + (r["data_dodania"] or "—") + "</td>"
+        "<td><span class='badge " + ("b-green" if r["aktywne"] else "b-gray") + "'>" + ("aktywne" if r["aktywne"] else "nieaktywne") + "</span></td>"
+        "<td class='nowrap'>"
+        "<a href='/stado/" + str(r["id"]) + "/edytuj' class='btn bo bsm'>Edytuj</a> "
+        "<a href='/stado/" + str(r["id"]) + "/ubytki' class='btn br bsm'>- Ubytek</a>"
+        "</td></tr>"
         for r in rows
     )
+
+    # Tabela ubytków
+    ub_rows = "".join(
+        "<tr>"
+        "<td style='font-size:13px;white-space:nowrap'>" + u["data"] + "</td>"
+        "<td>" + (u["sn"] or "—") + "</td>"
+        "<td style='font-weight:600;color:#A32D2D;text-align:center'>-" + str(u["ilosc"]) + "</td>"
+        "<td>" + POWOD.get(u["powod"] or "inne", u["powod"] or "—") + "</td>"
+        "<td style='font-size:11px;color:#888'>" + (u["uwagi"] or "") + "</td>"
+        "</tr>"
+        for u in ub_last
+    )
+
+    # Statystyki per powód
+    stat_html = "".join(
+        "<div style='display:flex;justify-content:space-between;padding:4px 0;"
+        "border-bottom:1px solid #f0ede4;font-size:13px'>"
+        "<span>" + POWOD.get(u["powod"] or "inne", u["powod"] or "inne") + "</span>"
+        "<b style='color:#A32D2D'>" + str(u["s"]) + " szt.</b>"
+        "</div>"
+        for u in ub_by_powod
+    )
+
     html = (
-        '<h1>Stado</h1>'
-        '<div class="g3" style="margin-bottom:12px">'
-        '<div class="card stat"><div class="v">' + str(total) + '</div><div class="l">Łącznie aktywnych</div></div>'
-        '<div class="card stat"><div class="v">' + str(sum(r["liczba"] for r in rows if r["aktywne"] and r["gatunek"]=="nioski")) + '</div><div class="l">Nioski</div></div>'
-        '<div class="card stat"><div class="v">' + str(sum(r["liczba"] for r in rows if r["aktywne"] and r["gatunek"]=="kogut")) + '</div><div class="l">Koguty</div></div>'
-        '</div>'
-        '<a href="/stado/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj grupę</a>'
-        '<div class="card" style="overflow-x:auto"><table>'
-        '<thead><tr><th>Nazwa</th><th>Gatunek</th><th>Liczba</th><th>Rasa</th><th>Dodano</th><th>Status</th><th></th></tr></thead>'
-        '<tbody>' + (w or '<tr><td colspan=7 style="color:#888;text-align:center;padding:20px">Brak wpisów stada</td></tr>') + '</tbody></table></div>'
+        "<h1>Stado</h1>"
+        "<div class='g4' style='margin-bottom:12px'>"
+        "<div class='card stat'><div class='v'>" + str(total) + "</div><div class='l'>Łącznie aktywnych</div></div>"
+        "<div class='card stat'><div class='v'>" + str(nioski) + "</div><div class='l'>Nioski</div></div>"
+        "<div class='card stat'><div class='v'>" + str(koguty) + "</div><div class='l'>Koguty</div></div>"
+        "<div class='card stat'><div class='v' style='color:#A32D2D'>" + str(ub_total) + "</div><div class='l'>Łącznie strat</div></div>"
+        "</div>"
+        "<a href='/stado/dodaj' class='btn bp bsm' style='margin-bottom:12px'>+ Dodaj grupę</a>"
+        "<div class='card' style='overflow-x:auto;margin-bottom:12px'><table>"
+        "<thead><tr><th>Nazwa</th><th>Gatunek</th><th style='text-align:center'>Liczba</th>"
+        "<th>Rasa</th><th>Dodano</th><th>Status</th><th></th></tr></thead>"
+        "<tbody>" + (w or "<tr><td colspan=7 style='color:#888;text-align:center;padding:20px'>Brak wpisów stada</td></tr>") + "</tbody>"
+        "</table></div>"
+        "<div class='g2'>"
+        # Historia ubytków
+        "<div class='card'><b>Historia ubytków</b>"
+        "<div style='overflow-x:auto;margin-top:8px'><table style='font-size:13px'><thead><tr>"
+        "<th>Data</th><th>Grupa</th><th style='text-align:center'>Ilość</th><th>Powód</th><th>Uwagi</th>"
+        "</tr></thead><tbody>"
+        + (ub_rows or "<tr><td colspan=5 style='color:#888;text-align:center;padding:12px'>Brak ubytków</td></tr>")
+        + "</tbody></table></div></div>"
+        # Statystyki strat
+        "<div class='card'><b>Straty — podsumowanie</b>"
+        "<div style='margin-top:10px'>"
+        + (stat_html or "<p style='color:#888;font-size:13px'>Brak strat</p>")
+        + "</div>"
+        "<div style='margin-top:12px;padding-top:10px;border-top:1px solid #f0ede4;"
+        "display:flex;justify-content:space-between'>"
+        "<span style='font-weight:600'>Łącznie</span>"
+        "<b style='color:#A32D2D'>" + str(ub_total) + " szt.</b>"
+        "</div></div>"
+        "</div>"
     )
     return R(html, "stado")
+
+
+@app.route("/stado/<int:sid>/edytuj", methods=["GET","POST"])
+@farm_required
+def stado_edytuj(sid):
+    g = gid(); db = get_db()
+    r = db.execute("SELECT * FROM stado WHERE id=? AND gospodarstwo_id=?", (sid,g)).fetchone()
+    if not r: db.close(); return redirect("/stado")
+    if request.method == "POST":
+        stara = r["liczba"]
+        nowa  = int(request.form.get("liczba", stara) or stara)
+        rozn  = stara - nowa
+        db.execute(
+            "UPDATE stado SET nazwa=?,gatunek=?,liczba=?,rasa=?,data_urodzenia=?,uwagi=?,aktywne=? WHERE id=?",
+            (request.form.get("nazwa", r["nazwa"]),
+             request.form.get("gatunek", r["gatunek"]),
+             nowa,
+             request.form.get("rasa", r["rasa"] or ""),
+             request.form.get("data_urodzenia","") or None,
+             request.form.get("uwagi", r["uwagi"] or ""),
+             1 if request.form.get("aktywne") else 0,
+             sid))
+        # Jeśli liczba spadła — zapisz jako ubytek
+        if rozn > 0:
+            db.execute(
+                "INSERT INTO stado_ubytki(stado_id,gospodarstwo_id,data,ilosc,powod,uwagi)"
+                " VALUES(?,?,?,?,?,?)",
+                (sid, g, date.today().isoformat(), rozn,
+                 request.form.get("powod_korekty","korekta"),
+                 "Korekta stanu: " + str(stara) + " → " + str(nowa)))
+        db.commit(); db.close()
+        flash("Zaktualizowano grupę: " + str(nowa) + " szt.")
+        return redirect("/stado")
+    db.close()
+    html = (
+        "<h1>Edytuj grupę: " + r["nazwa"] + "</h1>"
+        "<div class='card'><form method='POST'>"
+        "<label>Nazwa grupy</label>"
+        "<input name='nazwa' required value='" + r["nazwa"] + "'>"
+        "<div class='g2'>"
+        "<div><label>Gatunek</label><select name='gatunek'>"
+        "<option value='nioski'" + (" selected" if r["gatunek"]=="nioski" else "") + ">Nioski</option>"
+        "<option value='kogut'" + (" selected" if r["gatunek"]=="kogut" else "") + ">Kogut(y)</option>"
+        "<option value='mixed'" + (" selected" if r["gatunek"]=="mixed" else "") + ">Mieszane</option>"
+        "</select></div>"
+        "<div><label>Liczba sztuk</label>"
+        "<input name='liczba' type='number' min='0' required value='" + str(r["liczba"]) + "'"
+        " style='font-size:22px;text-align:center'>"
+        "<p style='font-size:11px;color:#888;margin-top:3px'>Jeśli zmniejszysz — różnica zostanie zapisana jako ubytek</p>"
+        "</div>"
+        "</div>"
+        "<div class='g2'>"
+        "<div><label>Rasa</label><input name='rasa' value='" + (r["rasa"] or "") + "'></div>"
+        "<div><label>Data urodzenia</label><input name='data_urodzenia' type='date' value='" + (r["data_urodzenia"] or "") + "'></div>"
+        "</div>"
+        "<div class='g2'>"
+        "<div><label>Powód korekty (jeśli zmiana liczby)</label>"
+        "<select name='powod_korekty'>"
+        "<option value='padniecie'>Padnięcie</option>"
+        "<option value='choroba'>Choroba</option>"
+        "<option value='drapieznik'>Drapieżnik</option>"
+        "<option value='sprzedaz'>Sprzedaż żywca</option>"
+        "<option value='uboj'>Ubój</option>"
+        "<option value='korekta' selected>Korekta stanu</option>"
+        "</select></div>"
+        "<div><label>Status</label>"
+        "<label style='display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer'>"
+        "<input type='checkbox' name='aktywne'" + (" checked" if r["aktywne"] else "") + "> Aktywne"
+        "</label></div>"
+        "</div>"
+        "<label>Uwagi</label><textarea name='uwagi' rows='2'>" + (r["uwagi"] or "") + "</textarea>"
+        "<br><button class='btn bp' style='margin-top:12px'>Zapisz</button>"
+        "<a href='/stado' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "</form></div>"
+    )
+    return R(html, "stado")
+
 
 @app.route("/stado/dodaj", methods=["GET","POST"])
 @farm_required
@@ -887,7 +1026,9 @@ def stado_dodaj():
     g = gid()
     if request.method == "POST":
         db = get_db()
-        db.execute("INSERT INTO stado(gospodarstwo_id,nazwa,gatunek,liczba,data_dodania,data_urodzenia,rasa,uwagi) VALUES(?,?,?,?,?,?,?,?)",
+        db.execute(
+            "INSERT INTO stado(gospodarstwo_id,nazwa,gatunek,liczba,data_dodania,data_urodzenia,rasa,uwagi)"
+            " VALUES(?,?,?,?,?,?,?,?)",
             (g, request.form["nazwa"], request.form.get("gatunek","nioski"),
              request.form.get("liczba",0), request.form.get("data_dodania","") or None,
              request.form.get("data_urodzenia","") or None,
@@ -896,76 +1037,85 @@ def stado_dodaj():
         flash("Grupa dodana do stada.")
         return redirect("/stado")
     html = (
-        '<h1>Dodaj grupę do stada</h1><div class="card"><form method="POST">'
-        '<label>Nazwa grupy</label><input name="nazwa" required placeholder="np. Nioski wiosna 2024">'
-        '<div class="g2">'
-        '<div><label>Gatunek</label><select name="gatunek">'
-        '<option value="nioski">Nioski</option><option value="kogut">Kogut(y)</option><option value="mixed">Mieszane</option>'
-        '</select></div>'
-        '<div><label>Liczba sztuk</label><input name="liczba" type="number" min="1" required></div>'
-        '</div>'
-        '<div class="g2">'
-        '<div><label>Rasa</label><input name="rasa" placeholder="np. Sussex"></div>'
-        '<div><label>Data dodania</label><input name="data_dodania" type="date" value="' + date.today().isoformat() + '"></div>'
-        '</div>'
-        '<label>Data urodzenia</label><input name="data_urodzenia" type="date">'
-        '<label>Uwagi</label><textarea name="uwagi" rows="2"></textarea>'
-        '<br><button class="btn bp">Dodaj</button>'
-        '<a href="/stado" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
+        "<h1>Dodaj grupę do stada</h1><div class='card'><form method='POST'>"
+        "<label>Nazwa grupy</label><input name='nazwa' required placeholder='np. Nioski wiosna 2024'>"
+        "<div class='g2'>"
+        "<div><label>Gatunek</label><select name='gatunek'>"
+        "<option value='nioski'>Nioski</option>"
+        "<option value='kogut'>Kogut(y)</option>"
+        "<option value='mixed'>Mieszane</option>"
+        "</select></div>"
+        "<div><label>Liczba sztuk</label><input name='liczba' type='number' min='1' required></div>"
+        "</div>"
+        "<div class='g2'>"
+        "<div><label>Rasa</label><input name='rasa' placeholder='np. Sussex'></div>"
+        "<div><label>Data dodania</label><input name='data_dodania' type='date' value='" + date.today().isoformat() + "'></div>"
+        "</div>"
+        "<label>Data urodzenia</label><input name='data_urodzenia' type='date'>"
+        "<label>Uwagi</label><textarea name='uwagi' rows='2'></textarea>"
+        "<br><button class='btn bp'>Dodaj</button>"
+        "<a href='/stado' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "</form></div>"
     )
     return R(html, "stado")
+
 
 @app.route("/stado/<int:sid>/ubytki", methods=["GET","POST"])
 @farm_required
 def stado_ubytki(sid):
-    g = gid()
-    db = get_db()
+    g = gid(); db = get_db()
     if request.method == "POST":
-        ile   = int(request.form.get("ile",0))
+        ile   = int(request.form.get("ile",0) or 0)
         powod = request.form.get("powod","inne")
         r = db.execute("SELECT liczba FROM stado WHERE id=? AND gospodarstwo_id=?", (sid,g)).fetchone()
         if r and ile > 0:
             nowa = max(0, r["liczba"] - ile)
             db.execute("UPDATE stado SET liczba=? WHERE id=?", (nowa, sid))
-            db.execute("INSERT INTO stado_ubytki(stado_id,gospodarstwo_id,data,ilosc,powod,uwagi) VALUES(?,?,?,?,?,?)",
-                       (sid, g, date.today().isoformat(), ile, powod, request.form.get("uwagi","")))
+            db.execute(
+                "INSERT INTO stado_ubytki(stado_id,gospodarstwo_id,data,ilosc,powod,uwagi)"
+                " VALUES(?,?,?,?,?,?)",
+                (sid, g, date.today().isoformat(), ile, powod, request.form.get("uwagi","")))
             db.commit()
-            flash(f"Ubytek {ile} szt. ({powod}). Nowy stan: {nowa}")
+            flash("Ubytek " + str(ile) + " szt. (" + powod + "). Nowy stan: " + str(nowa))
         db.close()
         return redirect("/stado")
     r = db.execute("SELECT * FROM stado WHERE id=? AND gospodarstwo_id=?", (sid,g)).fetchone()
     db.close()
     if not r: return redirect("/stado")
     html = (
-        '<h1>Ubytki — ' + r["nazwa"] + '</h1>'
-        '<p style="color:#888;font-size:13px;margin-bottom:12px">Aktualny stan: <b>' + str(r["liczba"]) + '</b> szt.</p>'
-        '<div class="card"><form method="POST">'
-        '<label>Liczba usuniętych sztuk</label><input name="ile" type="number" min="1" max="' + str(r["liczba"]) + '" required>'
-        '<label>Powód</label><select name="powod">'
-        '<option value="padniecie">Padnięcie (naturalne)</option>'
-        '<option value="choroba">Padnięcie (choroba)</option>'
-        '<option value="drapieznik">Atak drapieżnika</option>'
-        '<option value="sprzedaz">Sprzedaż żywca</option>'
-        '<option value="uboj">Ubój własny</option>'
-        '<option value="inne">Inne</option>'
-        '</select>'
-        '<label>Uwagi</label><textarea name="uwagi" rows="2"></textarea>'
-        '<br><button class="btn br">Zapisz ubytek</button>'
-        '<a href="/stado" class="btn bo" style="margin-left:8px">Anuluj</a>'
-        '</form></div>'
+        "<h1>Ubytek — " + r["nazwa"] + "</h1>"
+        "<p style='color:#888;font-size:13px;margin-bottom:12px'>Aktualny stan: <b>" + str(r["liczba"]) + "</b> szt.</p>"
+        "<div class='card'><form method='POST'>"
+        "<label>Liczba usuniętych sztuk</label>"
+        "<input name='ile' type='number' min='1' max='" + str(r["liczba"]) + "' required"
+        " style='font-size:22px;text-align:center'>"
+        "<label>Powód</label><select name='powod'>"
+        "<option value='padniecie'>🐔 Padnięcie (naturalne)</option>"
+        "<option value='choroba'>🦠 Padnięcie (choroba)</option>"
+        "<option value='drapieznik'>🦊 Atak drapieżnika</option>"
+        "<option value='sprzedaz'>💰 Sprzedaż żywca</option>"
+        "<option value='uboj'>🔪 Ubój własny</option>"
+        "<option value='inne'>📋 Inne</option>"
+        "</select>"
+        "<label>Data zdarzenia</label>"
+        "<input name='data_ubytku' type='date' value='" + date.today().isoformat() + "'>"
+        "<label>Uwagi</label><textarea name='uwagi' rows='2'></textarea>"
+        "<br><button class='btn br' style='margin-top:12px'>Zapisz ubytek</button>"
+        "<a href='/stado' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "</form></div>"
     )
     return R(html, "stado")
+
 
 @app.route("/stado/<int:sid>/toggle")
 @farm_required
 def stado_toggle(sid):
-    g = gid()
-    db = get_db()
+    g = gid(); db = get_db()
     db.execute("UPDATE stado SET aktywne=1-aktywne WHERE id=? AND gospodarstwo_id=?", (sid,g))
     db.commit(); db.close()
     flash("Status stada zmieniony.")
     return redirect("/stado")
+
 
 # ─── ZAMÓWIENIA ───────────────────────────────────────────────────────────────
 @app.route("/zamowienia")
