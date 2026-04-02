@@ -71,15 +71,14 @@ def register_sprzedaz(app):
             return redirect("/sprzedaz")
 
         # ── GET ───────────────────────────────────────────────────────────
-        # Filtr dat z query params
-        data_od  = request.args.get("od", "")
-        data_do  = request.args.get("do", "")
-        # Domyślnie: bieżący miesiąc
+        # Filtr dat - priorytet: query param > sesja > biezacy miesiac
+        data_od = request.args.get("od", "")
+        data_do = request.args.get("do", "")
+        sesja_dat = session.get("zakres_dat", {})
         if not data_od:
-            dzis = date.today()
-            data_od = dzis.replace(day=1).isoformat()
+            data_od = sesja_dat.get("od", date.today().replace(day=1).isoformat())
         if not data_do:
-            data_do = date.today().isoformat()
+            data_do = sesja_dat.get("do", date.today().isoformat())
 
         db = get_db()
 

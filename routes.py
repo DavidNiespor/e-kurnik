@@ -258,8 +258,26 @@ def register_routes(app):
                 return ok, ("OK" if ok else str(result.get("msg","Błąd Supla")))
             except Exception as e:
                 return False, str(e)
-        # GPIO / ESPHome
+        # Sprawdz czy to bezposrednie GPIO RPi (gpio_pin w kanal_sterowanie)
         db = get_db()
+        ks_row = db.execute(
+            "SELECT gpio_pin, tryb FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kanal=?",
+            (g, kanal)).fetchone()
+        if ks_row and ks_row["tryb"] == "rpi_gpio" and ks_row["gpio_pin"]:
+            pin = int(ks_row["gpio_pin"])
+            db.close()
+            try:
+                import RPi.GPIO as GPIO
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setwarnings(False)
+                GPIO.setup(pin, GPIO.OUT)
+                GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
+                return True, "GPIO pin " + str(pin) + " = " + ("HIGH" if stan else "LOW")
+            except ImportError:
+                return False, "RPi.GPIO niedostepne — aplikacja nie dziala na RPi"
+            except Exception as e:
+                return False, "GPIO blad: " + str(e)
+        # GPIO / ESPHome przez siec
         dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
         if not dev: db.close(); return False, "Brak urządzenia"
         if dev["typ"] == "esphome":

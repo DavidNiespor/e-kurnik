@@ -36,6 +36,16 @@ from backup_views import register_backup
 def gid():
     return session.get("farm_id")
 
+def get_date_range():
+    """Zwraca (od, do) z sesji lub domyslnie biezacy miesiac."""
+    from datetime import date
+    d = session.get("zakres_dat", {})
+    dzis = date.today()
+    od = d.get("od", dzis.replace(day=1).isoformat())
+    do = d.get("do", dzis.isoformat())
+    return od, do
+
+
 def gs(key, default=""):
     return get_setting(key, default, gid())
 
@@ -336,6 +346,22 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 {% for msg in get_flashed_messages() %}
 <div class="flash" style="max-width:980px;margin:8px auto 0">{{ msg }}</div>
 {% endfor %}
+{% if farm_id %}
+<div style="background:#fff;border-bottom:1px solid #e0ddd4;padding:5px 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px">
+<form method="POST" action="/ustaw-zakres" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0">
+<input type="hidden" name="next" value="{{ request.path }}">
+<span style="color:#aaa">📅</span>
+<input name="od" type="date" value="{{ session.get('zakres_dat',{}).get('od','') }}" style="font-size:12px;padding:3px 6px;border:1px solid #d3d1c7;border-radius:6px">
+<span style="color:#aaa">—</span>
+<input name="do" type="date" value="{{ session.get('zakres_dat',{}).get('do','') }}" style="font-size:12px;padding:3px 6px;border:1px solid #d3d1c7;border-radius:6px">
+<button style="font-size:12px;padding:3px 10px;background:#534AB7;color:#fff;border:none;border-radius:6px;cursor:pointer">Ustaw</button>
+<button type="submit" name="reset" value="1" style="font-size:12px;padding:3px 10px;background:#f5f5f0;color:#888;border:1px solid #d3d1c7;border-radius:6px;cursor:pointer">Reset</button>
+{% if session.get('zakres_dat') %}
+<span style="background:#EEEDFE;color:#534AB7;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ session['zakres_dat']['od'] }} — {{ session['zakres_dat']['do'] }}</span>
+{% endif %}
+</form>
+</div>
+{% endif %}
 <div class="wrap">{{ content }}</div>
 </body>
 </html>
@@ -622,6 +648,18 @@ def produkcja_dodaj():
     return redirect("/")
 
 
+@app.route("/ustaw-zakres", methods=["POST"])
+def ustaw_zakres():
+    od = request.form.get("od", "")
+    do = request.form.get("do", "")
+    next_url = request.form.get("next", request.referrer or "/")
+    if od and do:
+        session["zakres_dat"] = {"od": od, "do": do}
+    elif request.form.get("reset"):
+        session.pop("zakres_dat", None)
+    return redirect(next_url)
+
+
 @app.route("/")
 @farm_required
 def dashboard():
@@ -706,8 +744,9 @@ def dashboard():
                else ("<span style='color:#888'>○ OFF</span>" if ok
                else "<span style='color:#bbb;font-size:10px'>⚙ ustaw</span>"))
         ns  = "false" if on else "true"
-        oc  = ("tR(" + str(did) + ",'" + str(kan) + "'," + ns + ")" if (ok and did and kan)
-               else "window.location='/sterowanie'")
+        # Supla: did może być None, wystarczy że kan jest ustawiony
+        oc  = ("tR(" + (str(did) if did else "null") + ",'" + str(kan) + "'," + ns + ")" if (ok and kan)
+               else "window.location='/sterowanie/kafelki'")
         return (
             "<div style='border:2px solid " + bc + ";border-radius:10px;padding:10px 4px;"
             "text-align:center;background:" + bg + ";cursor:pointer;transition:all .15s;"
