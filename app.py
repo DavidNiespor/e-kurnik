@@ -750,66 +750,46 @@ def dashboard():
         except: pass
 
     # ── STAŁE KAFELKI STEROWANIA ─────────────────────────────────────────
-    FIXED_CH = [
-        ("swiatlo_kurnik",   "💡", "Światło kurnik",    "swiatlo"),
-        ("swiatlo_obejscie", "💡", "Światło obejście",  "swiatlo"),
-        ("swiatlo_gniazda",  "💡", "Światło gniazda",   "swiatlo"),
-        ("wentylacja",       "💨", "Wentylacja",         "wentylacja"),
-        ("dozowanie_paszy",  "🌾", "Dozowanie paszy",    "pojenie"),
-        ("dozowanie_wody",   "💧", "Dozowanie wody",     "pojenie"),
-    ]
+    # Kafelki sterowania — dynamiczne z bazy
     db2 = get_db()
-    kanal_cfg = {}
-    for fkey, fico, flabel, fkat in FIXED_CH:
-        cfg = db2.execute(
-            "SELECT ks.urzadzenie_id, ks.kanal, ks.tryb, ks.supla_channel_id, ks.opis,"
-            " COALESCE(uc.stan, sc.ostatni_stan, 0) as stan"
-            " FROM kanal_sterowanie ks"
-            " LEFT JOIN urzadzenia_kanaly uc"
-            "   ON uc.urzadzenie_id=ks.urzadzenie_id AND uc.kanal=ks.kanal"
-            " LEFT JOIN supla_config sc"
-            "   ON sc.channel_id=ks.supla_channel_id AND sc.gospodarstwo_id=ks.gospodarstwo_id"
-            " WHERE ks.gospodarstwo_id=? AND ks.kategoria=?"
-            " ORDER BY ks.id LIMIT 1", (g, fkat)).fetchone()
-        if cfg:
-            c = dict(cfg)
-            # Dla Supla: kanal = "supla_CHANNEL_ID"
-            if c.get("tryb") == "supla" and c.get("supla_channel_id"):
-                c["kanal"] = "supla_" + str(c["supla_channel_id"])
-            kanal_cfg[fkey] = c
-        else:
-            kanal_cfg[fkey] = None
+    _kaf_rows = db2.execute(
+        "SELECT ks.id, ks.kafelek_key, ks.kafelek_nazwa, ks.kafelek_ikona, ks.kanal, ks.tryb,"
+        " ks.supla_channel_id, ks.gpio_pin, ks.urzadzenie_id,"
+        " COALESCE(uc.stan, sc.ostatni_stan, 0) as stan"
+        " FROM kanal_sterowanie ks"
+        " LEFT JOIN urzadzenia_kanaly uc ON uc.urzadzenie_id=ks.urzadzenie_id AND uc.kanal=ks.kanal"
+        " LEFT JOIN supla_config sc ON sc.channel_id=ks.supla_channel_id AND sc.gospodarstwo_id=ks.gospodarstwo_id"
+        " WHERE ks.gospodarstwo_id=? AND ks.kafelek_key!='' AND ks.kafelek_key IS NOT NULL"
+        " ORDER BY ks.id", (g,)).fetchall()
     woda_dzis  = float(db2.execute("SELECT COALESCE(SUM(litry),0) as s FROM woda_reczna WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     prad_dzis  = float(db2.execute("SELECT COALESCE(SUM(kwh),0) as s FROM prad_odczyty WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     pasza_dzis = float(db2.execute("SELECT COALESCE(SUM(pasza_wydana_kg),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     db2.close()
 
-    def _kaf(fkey, fico, flabel, fkat):
-        cfg = kanal_cfg.get(fkey)
-        on  = bool(cfg and cfg.get("stan"))
-        ok  = cfg is not None
-        did = cfg["urzadzenie_id"] if cfg else None
-        kan = cfg["kanal"] if cfg else None
-        bc  = "#3B6D11" if on else ("#7F77DD" if ok else "#e0ddd4")
+    def _kaf_row(row):
+        on  = bool(row["stan"])
+        kan = row["kanal"]
+        did = row["urzadzenie_id"]
+        ico = row["kafelek_ikona"] or "⚡"
+        lbl = row["kafelek_nazwa"] or kan or "?"
+        bc  = "#3B6D11" if on else "#7F77DD"
         bg  = "#f4faf0" if on else "#fff"
-        dot = ("<span style='color:#3B6D11;font-weight:600'>● ON</span>" if on
-               else ("<span style='color:#888'>○ OFF</span>" if ok
-               else "<span style='color:#bbb;font-size:10px'>⚙ ustaw</span>"))
         ns  = "false" if on else "true"
-        # Supla: did może być None, wystarczy że kan jest ustawiony
-        oc  = ("tR(" + (str(did) if did else "null") + ",'" + str(kan) + "'," + ns + ")" if (ok and kan)
-               else "window.location='/sterowanie/kafelki'")
+        oc  = ("tR(" + (str(did) if did else "null") + ",'" + str(kan) + "'," + ns + ")")
+        st  = ("<span style='color:#3B6D11;font-size:9px;font-weight:700'>● ON</span>" if on
+               else "<span style='color:#aaa;font-size:9px'>○ OFF</span>")
         return (
-            "<div style='border:2px solid " + bc + ";border-radius:10px;padding:10px 4px;"
-            "text-align:center;background:" + bg + ";cursor:pointer;transition:all .15s;"
-            "touch-action:manipulation;min-width:0;overflow:hidden' onclick=\"" + oc + "\">"
-            "<div style='font-size:20px;line-height:1'>" + fico + "</div>"
-            "<div style='font-size:10px;font-weight:600;margin-top:4px;color:#2c2c2a;line-height:1.2;word-break:break-word'>" + flabel + "</div>"
-            "<div style='font-size:9px;margin-top:2px'>" + dot + "</div>"
+            "<div style='border:2px solid " + bc + ";border-radius:8px;padding:7px 3px;"
+            "text-align:center;background:" + bg + ";cursor:pointer;transition:all .12s;"
+            "touch-action:manipulation;min-width:0' onclick=\"" + oc + "\">" 
+            "<div style='font-size:18px;line-height:1'>" + ico + "</div>"
+            "<div style='font-size:9px;font-weight:600;margin-top:3px;color:#2c2c2a;"
+            "line-height:1.2;word-break:break-word;padding:0 2px'>" + lbl + "</div>"
+            "<div style='margin-top:2px'>" + st + "</div>"
             "</div>"
         )
 
-    kafelki_ster = "".join(_kaf(*ch) for ch in FIXED_CH)
+    kafelki_ster = "".join(_kaf_row(r) for r in _kaf_rows)
     zuzycia_kaf = (
         "<div style='border:2px solid #e0ddd4;border-radius:10px;padding:10px 4px;background:#fff;min-width:0;overflow:hidden'>"
         "<div style='font-size:20px;text-align:center'>📊</div>"
@@ -825,7 +805,9 @@ def dashboard():
         "<div class='card' style='margin-bottom:12px'>"
         "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>"
         "<b>Sterowanie</b>"
-        "<a href='/sterowanie' style='font-size:12px;color:#534AB7'>Konfiguruj →</a>"
+        "<div style='display:flex;gap:8px'>"
+        "<a href='/sterowanie/kafelki' style='font-size:12px;color:#534AB7'>⚙ Kafelki</a>"
+        "<a href='/sterowanie' style='font-size:12px;color:#888'>Panel →</a></div>"
         "</div>"
         "<style>.ster-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}"
         "@media(max-width:720px){.ster-grid{grid-template-columns:repeat(4,1fr)}}"

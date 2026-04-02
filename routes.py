@@ -3099,62 +3099,66 @@ def register_routes(app):
     @farm_required
     def sterowanie_kafelki():
         g = gid(); db = get_db()
-        KAFELKI = [
-            ("swiatlo_kurnik",   "💡", "Swiatlo kurnik",   "swiatlo"),
-            ("swiatlo_obejscie", "💡", "Swiatlo obejscie", "swiatlo"),
-            ("swiatlo_gniazda",  "💡", "Swiatlo gniazda",  "swiatlo"),
-            ("wentylacja",       "💨", "Wentylacja",        "wentylacja"),
-            ("dozowanie_paszy",  "🌾", "Dozowanie paszy",   "pojenie"),
-            ("dozowanie_wody",   "💧", "Dozowanie wody",    "pojenie"),
-        ]
+        IKONY = ["💡","🚪","💨","💧","🌾","🔥","🔌","⚡","🌡️","🔔","🛡️","🌱"]
 
         if request.method == "POST":
-            # Usun stare wpisy dla tych kafelkow
-            for fkey, _, _, _ in KAFELKI:
-                db.execute(
-                    "DELETE FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kafelek_key=?",
-                    (g, fkey))
-            # Wstaw nowe
-            for fkey, _, _, fkat in KAFELKI:
-                val = request.form.get("kanal_"+fkey, "")
-                if not val:
-                    continue
-                pin_v = request.form.get("pin_"+fkey, "")
+            action = request.form.get("action","")
+
+            if action == "delete":
+                kid = request.form.get("kid")
+                if kid:
+                    db.execute("DELETE FROM kanal_sterowanie WHERE id=? AND gospodarstwo_id=?", (kid, g))
+                    db.commit()
+                db.close()
+                flash("Kafelek usunięty.")
+                return redirect("/sterowanie/kafelki")
+
+            if action == "add":
+                ikona = request.form.get("ikona","⚡")
+                nazwa = request.form.get("nazwa","").strip() or "Nowy"
+                kat   = request.form.get("kategoria","inne")
+                val   = request.form.get("kanal_val","")
+                pin_v = request.form.get("gpio_pin","").strip()
+                import hashlib as _h
+                fkey  = _h.md5(f"{g}{nazwa}{kat}".encode()).hexdigest()[:12]
+
                 if val == "rpi_gpio":
                     if not pin_v:
-                        flash("Podaj pin BCM dla " + fkey)
-                        continue
+                        db.close(); flash("Podaj pin BCM."); return redirect("/sterowanie/kafelki")
                     db.execute(
-                        "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id,gpio_pin,kafelek_key)"
-                        " VALUES(?,NULL,?,?,?,NULL,?,?)",
-                        (g, "rpi_pin:"+pin_v, "rpi_gpio", fkat, int(pin_v), fkey))
+                        "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,"
+                        "supla_channel_id,gpio_pin,kafelek_key,kafelek_nazwa,kafelek_ikona)"
+                        " VALUES(?,NULL,?,?,?,NULL,?,?,?,?)",
+                        (g, "rpi_pin:"+pin_v, "rpi_gpio", kat, int(pin_v), fkey, nazwa, ikona))
                 elif val.startswith("gpio:"):
                     parts = val.split(":")
-                    try:
-                        did_v = int(parts[1]); kan_v = parts[2]
-                    except (IndexError, ValueError):
-                        continue
+                    try: did_v = int(parts[1]); kan_v = parts[2]
+                    except: db.close(); return redirect("/sterowanie/kafelki")
                     db.execute(
-                        "INSERT OR REPLACE INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id,gpio_pin,kafelek_key)"
-                        " VALUES(?,?,?,?,?,NULL,NULL,?)",
-                        (g, did_v, kan_v, "rpi_siec", fkat, fkey))
+                        "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,"
+                        "supla_channel_id,gpio_pin,kafelek_key,kafelek_nazwa,kafelek_ikona)"
+                        " VALUES(?,?,?,?,?,NULL,NULL,?,?,?)",
+                        (g, did_v, kan_v, "rpi_siec", kat, fkey, nazwa, ikona))
                 elif val.startswith("supla:"):
                     ch_id = int(val[6:])
                     db.execute(
-                        "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id,gpio_pin,kafelek_key)"
-                        " VALUES(?,NULL,?,?,?,?,NULL,?)",
-                        (g, "supla_"+str(ch_id), "supla", fkat, ch_id, fkey))
-            db.commit(); db.close()
-            flash("Kafelki zapisane.")
-            return redirect("/sterowanie/kafelki")
+                        "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,"
+                        "supla_channel_id,gpio_pin,kafelek_key,kafelek_nazwa,kafelek_ikona)"
+                        " VALUES(?,NULL,?,?,?,?,NULL,?,?,?)",
+                        (g, "supla_"+str(ch_id), "supla", kat, ch_id, fkey, nazwa, ikona))
+                else:
+                    db.close(); flash("Wybierz źródło sterowania."); return redirect("/sterowanie/kafelki")
+                db.commit(); db.close()
+                flash("Kafelek dodany.")
+                return redirect("/sterowanie/kafelki")
 
-        # GET - pobierz aktualne przypisania per kafelek_key
-        aktualne = {}
-        for row in db.execute(
-            "SELECT kafelek_key,urzadzenie_id,kanal,tryb,supla_channel_id,gpio_pin,kategoria"
-            " FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kafelek_key!='' AND kafelek_key IS NOT NULL",
-            (g,)).fetchall():
-            aktualne[row["kafelek_key"]] = dict(row)
+        # GET
+        kafelki = db.execute(
+            "SELECT id, kafelek_key, kafelek_nazwa, kafelek_ikona, kanal, tryb,"
+            " supla_channel_id, gpio_pin, kategoria, urzadzenie_id"
+            " FROM kanal_sterowanie"
+            " WHERE gospodarstwo_id=? AND kafelek_key!='' AND kafelek_key IS NOT NULL"
+            " ORDER BY id", (g,)).fetchall()
 
         gpio_opts = []
         for u in db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1", (g,)).fetchall():
@@ -3167,77 +3171,125 @@ def register_routes(app):
                                "label":"☁ "+s["nazwa"]+" (ch:"+str(s["channel_id"])+")"})
         db.close()
 
-        def build_select(fkey, cur_val):
-            o = "<option value=''>— brak —</option>"
-            o += "<optgroup label='RPi GPIO bezposrednio'>"
-            o += "<option value='rpi_gpio'" + (" selected" if cur_val == "rpi_gpio" else "") + ">🔌 RPi GPIO (podaj pin BCM)</option>"
-            o += "</optgroup>"
-            if gpio_opts:
-                o += "<optgroup label='GPIO / ESP32 przez siec'>"
-                for x in gpio_opts:
-                    o += "<option value='"+x["val"]+"'"+ (" selected" if cur_val == x["val"] else "") +">"+x["label"]+"</option>"
-                o += "</optgroup>"
-            if supla_opts:
-                o += "<optgroup label='Supla Cloud'>"
-                for x in supla_opts:
-                    o += "<option value='"+x["val"]+"'"+ (" selected" if cur_val == x["val"] else "") +">"+x["label"]+"</option>"
-                o += "</optgroup>"
-            return "<select name='kanal_"+fkey+"' style='font-size:13px' onchange='showPin(""+fkey+"",this.value)'>"+o+"</select>"
-
-        rows_html = ""
-        for fkey, fico, flabel, fkat in KAFELKI:
-            cur = aktualne.get(fkey, {})
-            tryb = cur.get("tryb","")
-            if tryb == "supla" and cur.get("supla_channel_id"):
-                cur_val = "supla:"+str(cur["supla_channel_id"])
-                lbl = next((o["label"] for o in supla_opts if o["val"]==cur_val), cur_val)
-                badge = "<span class='badge b-purple'>"+lbl+"</span>"
+        # Lista istniejacych kafelkow
+        lista_html = ""
+        for k in kafelki:
+            tryb = k["tryb"] or ""
+            if tryb == "supla":
+                src_txt = "☁ Supla ch:"+str(k["supla_channel_id"])
+                badge = "b-purple"
             elif tryb == "rpi_gpio":
-                cur_val = "rpi_gpio"
-                badge = "<span class='badge b-green'>🔌 RPi pin "+str(cur.get("gpio_pin","?"))+"</span>"
-            elif cur.get("urzadzenie_id") and cur.get("kanal"):
-                cur_val = "gpio:"+str(cur["urzadzenie_id"])+":"+cur["kanal"]
-                lbl = next((o["label"] for o in gpio_opts if o["val"]==cur_val), cur_val)
-                badge = "<span class='badge b-blue'>"+lbl+"</span>"
+                src_txt = "🔌 RPi pin "+str(k["gpio_pin"])
+                badge = "b-green"
             else:
-                cur_val = ""; badge = "<span class='badge b-gray'>brak</span>"
-
-            cur_pin = str(cur.get("gpio_pin","") or "")
-            pin_input = (
-                "<div id='pin_"+fkey+"' style='margin-top:4px;"
-                +("display:flex" if cur_val=="rpi_gpio" else "display:none")
-                +";gap:6px;align-items:center'>"
-                "<label style='font-size:11px;color:#888;white-space:nowrap'>Pin BCM:</label>"
-                "<input name='pin_"+fkey+"' type='number' min='1' max='40'"
-                " value='"+cur_pin+"' placeholder='np. 17'"
-                " style='width:70px;font-size:13px;padding:4px'>"
+                src_txt = k["kanal"] or "?"
+                badge = "b-blue"
+            lista_html += (
+                "<div style='display:flex;align-items:center;gap:10px;padding:10px;"
+                "background:#fafaf8;border-radius:8px;margin-bottom:6px'>"
+                "<span style='font-size:22px;width:32px;text-align:center'>"+(k["kafelek_ikona"] or "⚡")+"</span>"
+                "<div style='flex:1'>"
+                "<div style='font-weight:600;font-size:14px'>"+(k["kafelek_nazwa"] or k["kanal"])+"</div>"
+                "<div style='margin-top:2px'><span class='badge "+badge+"' style='font-size:11px'>"+src_txt+"</span>"
+                "<span style='font-size:11px;color:#aaa;margin-left:6px'>"+k["kategoria"]+"</span></div>"
+                "</div>"
+                "<form method='POST' style='margin:0'>"
+                "<input type='hidden' name='action' value='delete'>"
+                "<input type='hidden' name='kid' value='"+str(k["id"])+"'>"
+                "<button class='btn br bsm' onclick=\"return confirm('Usuń?')\">✕</button>"
+                "</form>"
                 "</div>"
             )
-            rows_html += (
-                "<tr><td style='font-size:20px;text-align:center'>"+fico+"</td>"
-                "<td style='font-weight:500'>"+flabel+"</td>"
-                "<td>"+badge+"</td>"
-                "<td>"+build_select(fkey, cur_val)+pin_input+"</td></tr>"
-            )
+
+        if not lista_html:
+            lista_html = "<p style='color:#888;font-size:13px;text-align:center;padding:12px'>Brak kafelków. Dodaj poniżej.</p>"
+
+        # Opcje źródeł sterowania
+        src_opts = "<option value=''>— wybierz —</option>"
+        src_opts += "<optgroup label='🔌 RPi GPIO bezpośrednio'><option value='rpi_gpio'>RPi GPIO (pin BCM)</option></optgroup>"
+        if gpio_opts:
+            src_opts += "<optgroup label='📡 GPIO / ESP32 przez sieć'>"
+            for o in gpio_opts:
+                src_opts += "<option value='"+o["val"]+"'>"+o["label"]+"</option>"
+            src_opts += "</optgroup>"
+        if supla_opts:
+            src_opts += "<optgroup label='☁ Supla Cloud'>"
+            for o in supla_opts:
+                src_opts += "<option value='"+o["val"]+"'>"+o["label"]+"</option>"
+            src_opts += "</optgroup>"
+
+        # Ikony picker
+        ikony_btns = "".join(
+            "<button type='button' onclick=\"setIkona('"+ico+"')\" "
+            "id='ib_"+ico.replace('🌡️','TMP')+"' "
+            "style='font-size:20px;background:#fff;border:2px solid #e0ddd4;"
+            "border-radius:8px;padding:3px 8px;cursor:pointer'>"+ico+"</button>"
+            for ico in IKONY)
 
         html = (
-            "<h1>Kafelki dashboardu</h1>"
-            "<p style='font-size:13px;color:#888;margin-bottom:12px'>"
-            "Przypisz kanal do kafelka. RPi GPIO = bezposrednio na tym urzadzeniu.</p>"
-            "<div class='card'><form method='POST'>"
-            "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
-            "<th></th><th>Kafelek</th><th>Aktualne</th><th>Zmien na</th></tr></thead>"
-            "<tbody>"+rows_html+"</tbody></table></div>"
-            "<br><button class='btn bp' style='margin-top:12px'>Zapisz wszystkie</button>"
-            "<a href='/sterowanie' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+            "<h1>Kafelki sterowania</h1>"
+            "<div class='card' style='margin-bottom:12px'>"
+            "<b>Aktywne kafelki</b>"
+            "<div style='margin-top:10px'>"+lista_html+"</div>"
+            "</div>"
+
+            "<div class='card'>"
+            "<b>Dodaj kafelek</b>"
+            "<form method='POST' style='margin-top:12px'>"
+            "<input type='hidden' name='action' value='add'>"
+            "<input type='hidden' name='ikona' id='ikona-val' value='⚡'>"
+
+            "<div class='g2'>"
+            "<div><label>Nazwa</label>"
+            "<input name='nazwa' placeholder='np. Brama, Swiatlo kurnik' required></div>"
+            "<div><label>Ikona</label>"
+            "<div style='display:flex;gap:4px;flex-wrap:wrap;margin-top:6px'>"+ikony_btns+"</div>"
+            "</div></div>"
+
+            "<div class='g2' style='margin-top:10px'>"
+            "<div><label>Kategoria (dla harmonogramów)</label>"
+            "<select name='kategoria'>"
+            "<option value='swiatlo'>💡 Światło</option>"
+            "<option value='brama'>🚪 Brama</option>"
+            "<option value='wentylacja'>💨 Wentylacja</option>"
+            "<option value='pojenie'>💧 Pojenie/Woda</option>"
+            "<option value='grzanie'>🔥 Grzanie</option>"
+            "<option value='inne'>⚡ Inne</option>"
+            "</select></div>"
+            "<div><label>Źródło sterowania</label>"
+            "<select name='kanal_val' id='src-sel' onchange='showPin(this.value)'>"+src_opts+"</select>"
+            "</div></div>"
+
+            "<div id='pin-box' style='display:none;margin-top:8px'>"
+            "<label>Pin GPIO BCM (numer pinu na RPi)</label>"
+            "<input name='gpio_pin' type='number' min='1' max='40' placeholder='np. 17 = GPIO17'"
+            " style='font-size:18px;text-align:center;max-width:120px'>"
+            "<p style='font-size:11px;color:#888;margin-top:3px'>"
+            "Pin BCM: 17, 18, 27, 22, 23, 24, 25, 4, 5, 6, 12, 13, 16, 19, 20, 21, 26</p>"
+            "</div>"
+
+            "<button class='btn bp' style='margin-top:12px;width:100%;padding:11px'>+ Dodaj kafelek</button>"
             "</form>"
             "<script>"
-            "function showPin(fkey,val){"
-            "  var d=document.getElementById('pin_'+fkey);"
-            "  if(d)d.style.display=val==='rpi_gpio'?'flex':'none';"
+            "function setIkona(ico){"
+            "  document.getElementById('ikona-val').value=ico;"
+            "  document.querySelectorAll('[id^=ib_]').forEach(function(b){"
+            "    b.style.borderColor=b.textContent.trim()===ico?'#534AB7':'#e0ddd4';"
+            "    b.style.background=b.textContent.trim()===ico?'#EEEDFE':'#fff';"
+            "  });"
             "}"
-            "</script></div>"
+            "function showPin(v){"
+            "  document.getElementById('pin-box').style.display=v==='rpi_gpio'?'block':'none';"
+            "}"
+            "</script>"
+            "</div>"
+
+            "<div style='margin-top:12px;display:flex;gap:8px'>"
+            "<a href='/sterowanie' class='btn bo bsm'>← Sterowanie</a>"
+            "<a href='/' class='btn bo bsm'>Dashboard</a>"
+            "</div>"
         )
         return R(html, "gpio")
+
 
     return app
