@@ -270,7 +270,34 @@ def register_routes(app):
                                 save_setting("supla_token_expires", exp2, g)
                     except Exception:
                         pass
-                result = api_call(access_token, f"/channels/{ch_id}", method="PATCH", body={"action": "TURN_ON" if stan else "TURN_OFF"})
+                # Pobierz typ funkcji kanalu zeby uzyc wlasciwej akcji
+                db_fn = get_db()
+                fn_row = db_fn.execute(
+                    "SELECT funkcja FROM supla_config WHERE channel_id=? AND gospodarstwo_id=?",
+                    (ch_id, g)).fetchone()
+                db_fn.close()
+                fn = (fn_row["funkcja"] or "").upper() if fn_row else ""
+                # Jesli nie wiemy funkcji - zapytaj API
+                if not fn:
+                    ch_info = api_call(access_token, f"/channels/{ch_id}")
+                    fn = str(ch_info.get("function",{}).get("name","") or "").upper()
+                    if fn:
+                        db_fn2 = get_db()
+                        db_fn2.execute("UPDATE supla_config SET funkcja=? WHERE channel_id=? AND gospodarstwo_id=?", (fn, ch_id, g))
+                        db_fn2.commit(); db_fn2.close()
+                # Wybierz akcje wg funkcji
+                ROLLER = {"CONTROLLINGTHEROLLERSHUTTER","CONTROLLINGTHEROOFWINDOW","CONTROLLINGTHEFACADEBLIND"}
+                DOOR   = {"CONTROLLINGTHEDOORLOCK","CONTROLLINGTHEGATEWAY","CONTROLLINGTHEGATE"}
+                VALVE  = {"VALVE_OPEN_CLOSE","VALVE_PERCENTAGE"}
+                if fn in ROLLER:
+                    action = "REVEAL" if stan else "SHUT"
+                elif fn in DOOR:
+                    action = "OPEN"
+                elif fn in VALVE:
+                    action = "OPEN" if stan else "CLOSE"
+                else:
+                    action = "TURN_ON" if stan else "TURN_OFF"
+                result = api_call(access_token, f"/channels/{ch_id}", method="PATCH", body={"action": action})
                 ok = "error" not in result
                 if ok:
                     db3 = get_db()
@@ -1067,8 +1094,19 @@ def register_routes(app):
             uid = request.form.get("urzadzenie_id") or None
             kanal = request.form.get("kanal","") or None
             ch_id = int(request.form.get("channel_id",0) or 0)
-            db.execute("INSERT INTO supla_config(gospodarstwo_id,nazwa,channel_id,powiazane_urzadzenie_id,powiazany_kanal,aktywny) VALUES(?,?,?,?,?,1)",
+            # Pobierz funkcję kanału z Supla API i zapisz
+            _fn = ""
+            try:
+                from supla_oauth import api_call as _sac
+                _tok_r = db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_access_token' AND gospodarstwo_id=?", (g,)).fetchone()
+                if _tok_r and ch_id:
+                    _ci = _sac(_tok_r["wartosc"], f"/channels/{ch_id}")
+                    _fn = str(_ci.get("function",{}).get("name","") or "").upper()
+            except Exception: pass
+            db.execute("INSERT OR IGNORE INTO supla_config(gospodarstwo_id,nazwa,channel_id,powiazane_urzadzenie_id,powiazany_kanal,aktywny) VALUES(?,?,?,?,?,1)",
                 (g, request.form["nazwa"], ch_id, uid, kanal))
+            try: db.execute("UPDATE supla_config SET funkcja=? WHERE channel_id=? AND gospodarstwo_id=?", (_fn, ch_id, g))
+            except Exception: pass
             # Zsynchronizuj kanal_sterowanie — ustaw tryb supla dla tego kanału
             if uid and kanal:
                 ex_ks = db.execute("SELECT id FROM kanal_sterowanie WHERE gospodarstwo_id=? AND urzadzenie_id=? AND kanal=?", (g, uid, kanal)).fetchone()

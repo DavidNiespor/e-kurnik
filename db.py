@@ -363,6 +363,7 @@ def init_db():
         "ALTER TABLE kanal_sterowanie ADD COLUMN kafelek_key TEXT DEFAULT ''",
         "ALTER TABLE kanal_sterowanie ADD COLUMN kafelek_nazwa TEXT DEFAULT ''",
         "ALTER TABLE kanal_sterowanie ADD COLUMN kafelek_ikona TEXT DEFAULT '⚡'",
+        "ALTER TABLE supla_config ADD COLUMN funkcja TEXT DEFAULT ''",
         "ALTER TABLE kanal_sterowanie ADD COLUMN kategoria TEXT DEFAULT 'inne'",
         "ALTER TABLE urzadzenia ADD COLUMN api_key TEXT DEFAULT ''",
         "ALTER TABLE urzadzenia ADD COLUMN aktywne INTEGER DEFAULT 1",
