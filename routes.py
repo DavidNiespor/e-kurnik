@@ -258,26 +258,29 @@ def register_routes(app):
                 return ok, ("OK" if ok else str(result.get("msg","Błąd Supla")))
             except Exception as e:
                 return False, str(e)
-        # Sprawdz czy to bezposrednie GPIO RPi (gpio_pin w kanal_sterowanie)
-        db = get_db()
-        ks_row = db.execute(
-            "SELECT gpio_pin, tryb FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kanal=?",
-            (g, kanal)).fetchone()
-        if ks_row and ks_row["tryb"] == "rpi_gpio" and ks_row["gpio_pin"]:
-            pin = int(ks_row["gpio_pin"])
-            db.close()
+        # Bezposrednie GPIO RPi: kanal = "rpi_pin:17"
+        if kanal and str(kanal).startswith("rpi_pin:"):
+            try:
+                pin = int(str(kanal).split(":")[1])
+            except (IndexError, ValueError):
+                return False, "Nieprawidlowy format kanalu RPi: " + str(kanal)
             try:
                 import RPi.GPIO as GPIO
                 GPIO.setmode(GPIO.BCM)
                 GPIO.setwarnings(False)
                 GPIO.setup(pin, GPIO.OUT)
                 GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
-                return True, "GPIO pin " + str(pin) + " = " + ("HIGH" if stan else "LOW")
+                db = get_db()
+                db.execute("UPDATE kanal_sterowanie SET gpio_pin=? WHERE gospodarstwo_id=? AND kanal=?",
+                           (pin, g, kanal))
+                db.commit(); db.close()
+                return True, "GPIO BCM" + str(pin) + " = " + ("ON" if stan else "OFF")
             except ImportError:
-                return False, "RPi.GPIO niedostepne — aplikacja nie dziala na RPi"
+                return False, "RPi.GPIO niedostepne — app nie dziala na RPi lub brak biblioteki"
             except Exception as e:
-                return False, "GPIO blad: " + str(e)
+                return False, "GPIO error: " + str(e)
         # GPIO / ESPHome przez siec
+        db = get_db()
         dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
         if not dev: db.close(); return False, "Brak urządzenia"
         if dev["typ"] == "esphome":
@@ -428,7 +431,7 @@ def register_routes(app):
                f'<a href="/produkcja/dodaj-pelny" class="btn bo bsm" style="margin-top:8px">Szczegółowy wpis</a></div>'
                if sp_html else
                '<div class="card"><a href="/produkcja/dodaj-pelny" class="btn bp bsm">+ Dodaj sprzedaż z przypisaniem do klienta</a></div>')
-            + '<script>function tR(d,c,s){fetch("/sterowanie/cmd",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(r=>r.json()).then(()=>location.reload());}</script>'
+            + '<script>function tR(d,c,s){fetch("/sterowanie/cmd",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(function(r){return r.ok?r.json():Promise.reject(r.status);}).then(function(j){if(j.ok)location.reload();else alert("Blad: "+(j.msg||"?"));}).catch(function(e){alert("Blad: "+e);});}</script>'
         )
         return R(html, "dash")
 
@@ -675,7 +678,7 @@ def register_routes(app):
                    f'<a href="/urzadzenia/{u["id"]}" class="btn bo bsm">Panel</a></div>'
                    f'<div class="g4">{ch_html or "<p style=\'color:#888;font-size:13px\'>Brak skonfigurowanych kanałów</p>"}</div></div>')
         db.close()
-        html+='<script>function tR(d,c,s){fetch("/sterowanie/cmd",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(r=>r.json()).then(()=>location.reload());}</script>'
+        html+='<script>function tR(d,c,s){fetch("/sterowanie/cmd",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})}).then(function(r){return r.ok?r.json():Promise.reject(r.status);}).then(function(j){if(j.ok)location.reload();else alert("Blad: "+(j.msg||"?"));}).catch(function(e){alert("Blad: "+e);});}</script>'
         return R(html,"gpio")
 
     # ─── STEROWANIE (tryby per kanał) ─────────────────────────────────────────
@@ -923,7 +926,7 @@ def register_routes(app):
             '<a href="/gpio/pwm/dodaj" class="btn bp bsm" style="margin-bottom:12px">+ Dodaj LED</a>'
             '<div class="card" style="overflow-x:auto"><table><thead><tr><th>Nazwa</th><th>Pin GPIO</th><th>Jasność</th><th></th></tr></thead>'
             f'<tbody>{w or "<tr><td colspan=4 style=\'color:#888;text-align:center;padding:20px\'>Brak kanałów LED</td></tr>"}</tbody></table></div>'
-            '<script>function setPWM(id,val){fetch("/gpio/pwm/set",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:id,jasnosc:parseInt(val)})}).then(r=>r.json()).then(()=>location.reload());}</script>')
+            '<script>function setPWM(id,val){fetch("/gpio/pwm/set",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:id,jasnosc:parseInt(val)})}).then(function(r){return r.ok?r.json():Promise.reject(r.status);}).then(function(j){if(j.ok)location.reload();else alert("Blad: "+(j.msg||"?"));}).catch(function(e){alert("Blad: "+e);});}</script>')
         return R(html,"gpio")
 
     @app.route("/gpio/pwm/dodaj", methods=["GET","POST"])
@@ -3082,93 +3085,141 @@ def register_routes(app):
             ("dozowanie_paszy",  "🌾", "Dozowanie paszy",   "pojenie"),
             ("dozowanie_wody",   "💧", "Dozowanie wody",    "pojenie"),
         ]
+
         if request.method == "POST":
-            # Zbierz wszystkie przypisania per kategoria (jeden kafelek moze byc w wielu fkeys tej samej kategorii)
-            assignments = {}  # fkat -> (did_v, kan_v, tryb_v, supla_ch)
+            assignments = {}
             for fkey, _, _, fkat in KAFELKI:
                 val = request.form.get("kanal_"+fkey, "")
                 if not val:
                     continue
-                if val.startswith("gpio:"):
+                pin_v = request.form.get("pin_"+fkey, "")
+                if val == "rpi_gpio":
+                    # Bezposrednie GPIO RPi - potrzebny pin BCM
+                    if not pin_v:
+                        flash("Podaj numer pinu BCM dla " + fkey)
+                        continue
+                    assignments[fkat] = (None, "rpi_pin:"+pin_v, "rpi_gpio", None, int(pin_v))
+                elif val.startswith("gpio:"):
                     parts = val.split(":")
-                    assignments[fkat] = (int(parts[1]), parts[2], "rpi_siec", None)
+                    assignments[fkat] = (int(parts[1]), parts[2], "rpi_siec", None, None)
                 elif val.startswith("supla:"):
                     ch_id = int(val[6:])
-                    assignments[fkat] = (None, "supla_"+str(ch_id), "supla", ch_id)
-            # Wyczysc wszystkie kategorie i wstaw nowe
+                    assignments[fkat] = (None, "supla_"+str(ch_id), "supla", ch_id, None)
+
             done_cats = set()
             for _, _, _, fkat in KAFELKI:
                 if fkat not in done_cats:
                     db.execute("DELETE FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kategoria=?", (g, fkat))
                     done_cats.add(fkat)
-            for fkat, (did_v, kan_v, tryb_v, supla_ch) in assignments.items():
-                db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id) VALUES(?,?,?,?,?,?)", (g, did_v, kan_v, tryb_v, fkat, supla_ch))
+            for fkat, (did_v, kan_v, tryb_v, supla_ch, gpio_p) in assignments.items():
+                db.execute(
+                    "INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id,gpio_pin)"
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (g, did_v, kan_v, tryb_v, fkat, supla_ch, gpio_p))
             db.commit(); db.close()
             flash("Kafelki zapisane.")
             return redirect("/sterowanie/kafelki")
 
+        # GET - pobierz opcje
         aktualne = {}
-        for row in db.execute("SELECT kategoria,urzadzenie_id,kanal,tryb,supla_channel_id FROM kanal_sterowanie WHERE gospodarstwo_id=?", (g,)).fetchall():
+        for row in db.execute(
+            "SELECT kategoria,urzadzenie_id,kanal,tryb,supla_channel_id,gpio_pin"
+            " FROM kanal_sterowanie WHERE gospodarstwo_id=?", (g,)).fetchall():
             aktualne[row["kategoria"]] = dict(row)
+
         gpio_opts = []
         for u in db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1", (g,)).fetchall():
             for ch in db.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=?", (u["id"],)).fetchall():
-                gpio_opts.append({"val":"gpio:"+str(u["id"])+":"+ch["kanal"], "label":u["nazwa"]+" / "+(ch["opis"] or ch["kanal"])})
+                gpio_opts.append({"val":"gpio:"+str(u["id"])+":"+ch["kanal"],
+                                  "label":u["nazwa"]+" / "+(ch["opis"] or ch["kanal"])})
         supla_opts = []
         for s in db.execute("SELECT channel_id,nazwa FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1", (g,)).fetchall():
-            supla_opts.append({"val":"supla:"+str(s["channel_id"]), "label":"☁ "+s["nazwa"]+" (ch:"+str(s["channel_id"])+")"})
+            supla_opts.append({"val":"supla:"+str(s["channel_id"]),
+                               "label":"☁ "+s["nazwa"]+" (ch:"+str(s["channel_id"])+")"})
         db.close()
+
+        # rpi_gpio zawsze dostepne
+        rpi_opt = {"val":"rpi_gpio", "label":"🔌 RPi GPIO bezposrednio (pin BCM)"}
 
         def build_select(fkey, cur_val):
             o = "<option value=''>— brak —</option>"
+            # RPi GPIO bezposrednie
+            o += "<optgroup label='RPi GPIO bezposrednio'>"
+            o += "<option value='rpi_gpio'" + (" selected" if cur_val == "rpi_gpio" else "") + ">🔌 RPi GPIO (podaj pin BCM)</option>"
+            o += "</optgroup>"
             if gpio_opts:
-                o += "<optgroup label='GPIO / ESP32'>"
+                o += "<optgroup label='GPIO / ESP32 przez siec'>"
                 for x in gpio_opts:
-                    o += "<option value='" + x["val"] + "'" + (" selected" if cur_val == x["val"] else "") + ">" + x["label"] + "</option>"
+                    o += "<option value='"+x["val"]+"'"+ (" selected" if cur_val == x["val"] else "") +">"+x["label"]+"</option>"
                 o += "</optgroup>"
             if supla_opts:
                 o += "<optgroup label='Supla Cloud'>"
                 for x in supla_opts:
-                    o += "<option value='" + x["val"] + "'" + (" selected" if cur_val == x["val"] else "") + ">" + x["label"] + "</option>"
+                    o += "<option value='"+x["val"]+"'"+ (" selected" if cur_val == x["val"] else "") +">"+x["label"]+"</option>"
                 o += "</optgroup>"
-            return "<select name='kanal_" + fkey + "' style='font-size:13px'>" + o + "</select>"
+            sel = "<select name='kanal_"+fkey+"' style='font-size:13px' onchange='showPin(""+fkey+"",this.value)'>"+o+"</select>"
+            return sel
 
         rows_html = ""
         for fkey, fico, flabel, fkat in KAFELKI:
             cur = aktualne.get(fkat, {})
-            if cur.get("tryb") == "supla" and cur.get("supla_channel_id"):
-                cur_val = "supla:" + str(cur["supla_channel_id"])
+            tryb = cur.get("tryb","")
+            if tryb == "supla" and cur.get("supla_channel_id"):
+                cur_val = "supla:"+str(cur["supla_channel_id"])
+                lbl = next((o["label"] for o in supla_opts if o["val"]==cur_val), cur_val)
+                badge = "<span class='badge b-purple'>"+lbl+"</span>"
+            elif tryb == "rpi_gpio":
+                cur_val = "rpi_gpio"
+                badge = "<span class='badge b-green'>🔌 RPi GPIO pin "+str(cur.get("gpio_pin","?"))+"</span>"
             elif cur.get("urzadzenie_id") and cur.get("kanal"):
-                cur_val = "gpio:" + str(cur["urzadzenie_id"]) + ":" + cur["kanal"]
+                cur_val = "gpio:"+str(cur["urzadzenie_id"])+":"+cur["kanal"]
+                lbl = next((o["label"] for o in gpio_opts if o["val"]==cur_val), cur_val)
+                badge = "<span class='badge b-blue'>"+lbl+"</span>"
             else:
-                cur_val = ""
-            if cur_val.startswith("supla:"):
-                lbl = next((o["label"] for o in supla_opts if o["val"] == cur_val), cur_val)
-                badge = "<span class='badge b-purple'>" + lbl + "</span>"
-            elif cur_val.startswith("gpio:"):
-                lbl = next((o["label"] for o in gpio_opts if o["val"] == cur_val), cur_val)
-                badge = "<span class='badge b-green'>" + lbl + "</span>"
-            else:
-                badge = "<span class='badge b-gray'>brak</span>"
-            rows_html += (
-                "<tr><td style='font-size:20px;text-align:center'>" + fico + "</td>"
-                "<td style='font-weight:500'>" + flabel + "</td>"
-                "<td>" + badge + "</td>"
-                "<td>" + build_select(fkey, cur_val) + "</td></tr>"
+                cur_val = ""; badge = "<span class='badge b-gray'>brak</span>"
+
+            cur_pin = str(cur.get("gpio_pin","") or "")
+            pin_input = (
+                "<div id='pin_"+fkey+"' style='margin-top:4px;"
+                +("display:flex" if cur_val=="rpi_gpio" else "display:none")
+                +";gap:6px;align-items:center'>"
+                "<label style='font-size:11px;color:#888;white-space:nowrap'>Pin BCM:</label>"
+                "<input name='pin_"+fkey+"' type='number' min='1' max='40'"
+                " value='"+cur_pin+"' placeholder='np. 17'"
+                " style='width:70px;font-size:13px;padding:4px'>"
+                "</div>"
             )
 
-        info = "" if (gpio_opts or supla_opts) else "<div class='al alw' style='margin-bottom:12px'>Brak urzadzen. <a href='/urzadzenia/dodaj'>Dodaj ESP32</a> lub <a href='/supla/dodaj'>mapuj Supla</a>.</div>"
+            rows_html += (
+                "<tr>"
+                "<td style='font-size:20px;text-align:center'>"+fico+"</td>"
+                "<td style='font-weight:500'>"+flabel+"</td>"
+                "<td>"+badge+"</td>"
+                "<td>"+build_select(fkey, cur_val)+pin_input+"</td>"
+                "</tr>"
+            )
+
+        js = (
+            "<script>"
+            "function showPin(fkey,val){"
+            "  var d=document.getElementById('pin_'+fkey);"
+            "  if(d)d.style.display=val==='rpi_gpio'?'flex':'none';"
+            "}"
+            "</script>"
+        )
+
+        info = "" if (gpio_opts or supla_opts or True) else ""
         html = (
             "<h1>Kafelki dashboardu</h1>"
-            "<p style='font-size:13px;color:#888;margin-bottom:12px'>Przypisz kanal GPIO lub Supla do kafelka na dashboardzie.</p>"
-            + info
-            + "<div class='card'><form method='POST'>"
+            "<p style='font-size:13px;color:#888;margin-bottom:12px'>"
+            "Przypisz kanal do kafelka. RPi GPIO = bezposrednio na tym urzadzeniu (podaj pin BCM).</p>"
+            "<div class='card'><form method='POST'>"
             "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
             "<th></th><th>Kafelek</th><th>Aktualne</th><th>Zmien na</th></tr></thead>"
-            "<tbody>" + rows_html + "</tbody></table></div>"
+            "<tbody>"+rows_html+"</tbody></table></div>"
             "<br><button class='btn bp' style='margin-top:12px'>Zapisz wszystkie</button>"
             "<a href='/sterowanie' class='btn bo' style='margin-left:8px'>Anuluj</a>"
-            "</form></div>"
+            "</form>"+js+"</div>"
         )
         return R(html, "gpio")
 

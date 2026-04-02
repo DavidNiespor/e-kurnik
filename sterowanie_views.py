@@ -122,9 +122,10 @@ def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=""):
         "fetch('/sterowanie/cmd',{method:'POST',"
         "headers:{'Content-Type':'application/json'},"
         "body:JSON.stringify({urzadzenie_id:d,kanal:c,stan:s})})"
-        ".then(r=>r.json())"
+        ".then(function(r){return r.ok?r.json():Promise.reject(r.status);})"
         ".then(function(j){if(j.ok)location.reload();"
-        "else alert('Błąd sterowania: '+(j.msg||'spróbuj ponownie'));});"
+        "else alert('Blad: '+(j.msg||'?'));})" 
+        ".catch(function(e){alert('Blad polaczenia: '+e);});"
         "}"
         "</script>"
 
