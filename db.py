@@ -360,6 +360,7 @@ def init_db():
         "ALTER TABLE kanal_sterowanie ADD COLUMN supla_channel_id INTEGER",
         "ALTER TABLE kanal_sterowanie ADD COLUMN esphome_entity TEXT DEFAULT ''",
         "ALTER TABLE kanal_sterowanie ADD COLUMN gpio_pin INTEGER",
+        "ALTER TABLE kanal_sterowanie ADD COLUMN kafelek_key TEXT DEFAULT ''",
         "ALTER TABLE urzadzenia ADD COLUMN api_key TEXT DEFAULT ''",
         "ALTER TABLE urzadzenia ADD COLUMN aktywne INTEGER DEFAULT 1",
         "ALTER TABLE urzadzenia ADD COLUMN ostatni_kontakt DATETIME",
