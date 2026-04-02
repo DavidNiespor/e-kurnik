@@ -204,6 +204,33 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   </div>
 
   <div class="nb-right">
+    {% if farm_id %}
+    <div class="ni" id="date-ni">
+      <button class="nl" id="date-btn" style="font-size:12px;gap:4px" onclick="toggleDate(event)">📅
+        <span id="date-lbl" style="color:#534AB7;font-weight:600">{{ session.get('zakres_dat',{}).get('od','…')[-5:] if session.get('zakres_dat') else '30d' }}</span>
+        <span class="ar">&#9660;</span></button>
+      <div class="nd nd-r" id="date-dd" style="min-width:280px;padding:12px">
+        <form method="POST" action="/ustaw-zakres" id="date-form">
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button type="button" onclick="setPreset(7)" class="btn bo bsm">7d</button>
+            <button type="button" onclick="setPreset(30)" class="btn bo bsm">30d</button>
+            <button type="button" onclick="setPresetMth()" class="btn bo bsm">Miesiąc</button>
+            <button type="button" onclick="setPresetYr()" class="btn bo bsm">Rok</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+            <input name="od" id="d-od" type="date" value="{{ session.get('zakres_dat',{}).get('od','') }}" style="flex:1;font-size:12px">
+            <span>—</span>
+            <input name="do" id="d-do" type="date" value="{{ session.get('zakres_dat',{}).get('do','') }}" style="flex:1;font-size:12px">
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn bp bsm" style="flex:1">Ustaw</button>
+            <button type="submit" name="reset" value="1" class="btn bo bsm">Reset</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
     <div class="ni">
       <button class="nl" style="font-size:12px">{{ login }} <span class="ar">&#9660;</span></button>
       <div class="nd nd-r">
@@ -282,6 +309,29 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   </div>
 
   <div class="dr-ft">
+    {% if farm_id %}
+    <div style="padding:12px 18px;border-top:1px solid #f0ede4">
+      <div style="font-size:11px;color:#aaa;margin-bottom:6px;font-weight:600">ZAKRES DAT</div>
+      <form method="POST" action="/ustaw-zakres">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <button type="button" onclick="setPreset(7)" class="btn bo bsm">7d</button>
+          <button type="button" onclick="setPreset(30)" class="btn bo bsm">30d</button>
+          <button type="button" onclick="setPresetMth()" class="btn bo bsm">Miesiąc</button>
+          <button type="button" onclick="setPresetYr()" class="btn bo bsm">Rok</button>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px">
+          <input name="od" id="m-od" type="date" value="{{ session.get('zakres_dat',{}).get('od','') }}" style="flex:1;font-size:14px;min-height:40px">
+          <span style="color:#aaa">—</span>
+          <input name="do" id="m-do" type="date" value="{{ session.get('zakres_dat',{}).get('do','') }}" style="flex:1;font-size:14px;min-height:40px">
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn bp" style="flex:1;padding:10px">Ustaw zakres</button>
+          <button type="submit" name="reset" value="1" class="btn bo" style="padding:10px">Reset</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
     <span style="font-size:13px;color:#888">{{ login }} &middot; {{ farm_name }}</span>
     <div style="display:flex;gap:14px">
       <a href="/konto" style="font-size:13px;color:#534AB7">Konto</a>
@@ -330,6 +380,24 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
     if(b){b.classList.remove('op');}
     document.body.style.overflow='';
   }
+  function toggleDate(e){e.stopPropagation();var ni=document.getElementById('date-ni');if(ni)ni.classList.toggle('op');}
+  function _fmtD(d){return d.toISOString().split('T')[0];}
+  function setPreset(days){
+    var t=new Date(),f=new Date();f.setDate(t.getDate()-days+1);
+    ['d-od','m-od'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(f);});
+    ['d-do','m-do'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(t);});
+  }
+  function setPresetMth(){
+    var t=new Date(),f=new Date(t.getFullYear(),t.getMonth(),1);
+    ['d-od','m-od'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(f);});
+    ['d-do','m-do'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(t);});
+  }
+  function setPresetYr(){
+    var t=new Date(),f=new Date(t.getFullYear(),0,1);
+    ['d-od','m-od'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(f);});
+    ['d-do','m-do'].forEach(function(id){var e=document.getElementById(id);if(e)e.value=_fmtD(t);});
+  }
+  document.addEventListener('DOMContentLoaded',function(){var od=document.getElementById('d-od');if(od&&!od.value)setPreset(30);});
   function drSec(id){
     document.getElementById(id).classList.toggle('op');
   }
@@ -346,22 +414,6 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 {% for msg in get_flashed_messages() %}
 <div class="flash" style="max-width:980px;margin:8px auto 0">{{ msg }}</div>
 {% endfor %}
-{% if farm_id %}
-<div style="background:#fff;border-bottom:1px solid #e0ddd4;padding:5px 16px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px">
-<form method="POST" action="/ustaw-zakres" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0">
-<input type="hidden" name="next" value="{{ request.path }}">
-<span style="color:#aaa">📅</span>
-<input name="od" type="date" value="{{ session.get('zakres_dat',{}).get('od','') }}" style="font-size:12px;padding:3px 6px;border:1px solid #d3d1c7;border-radius:6px">
-<span style="color:#aaa">—</span>
-<input name="do" type="date" value="{{ session.get('zakres_dat',{}).get('do','') }}" style="font-size:12px;padding:3px 6px;border:1px solid #d3d1c7;border-radius:6px">
-<button style="font-size:12px;padding:3px 10px;background:#534AB7;color:#fff;border:none;border-radius:6px;cursor:pointer">Ustaw</button>
-<button type="submit" name="reset" value="1" style="font-size:12px;padding:3px 10px;background:#f5f5f0;color:#888;border:1px solid #d3d1c7;border-radius:6px;cursor:pointer">Reset</button>
-{% if session.get('zakres_dat') %}
-<span style="background:#EEEDFE;color:#534AB7;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ session['zakres_dat']['od'] }} — {{ session['zakres_dat']['do'] }}</span>
-{% endif %}
-</form>
-</div>
-{% endif %}
 <div class="wrap">{{ content }}</div>
 </body>
 </html>
@@ -808,24 +860,24 @@ def dashboard():
             "</div>"
         )
     _jaja_form = (
-        "<div class='card'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
-        "<b>Zebrane jaja</b>"
-        + ("<span style='font-size:12px;color:#3B6D11;font-weight:500'>dziś: " + str(dzis["jaja_zebrane"]) + " szt.</span>"
-           if dzis else "<span style='font-size:12px;color:#aaa'>brak wpisu na dziś</span>")
+        "<div class='card' style='padding:10px'>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+        "<b style='font-size:13px'>🥚 Zebrane jaja</b>"
+        + ("<span style='font-size:11px;color:#3B6D11;font-weight:500'>" + str(dzis["jaja_zebrane"]) + " szt.</span>"
+           if dzis else "<span style='font-size:11px;color:#aaa'>—</span>")
         + "</div>"
-        + ("<div style='display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px'>" + _ostatnie_html + "</div>"
+        + ("<div style='display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px'>" + _ostatnie_html + "</div>"
            if _ostatnie_html else "")
         + "<form method='POST' action='/produkcja/dodaj'>"
-        + "<div style='display:flex;gap:8px;align-items:flex-end'>"
-        + "<div style='flex:1'><label>Szt. jaj</label>"
+        + "<div style='display:flex;gap:6px;align-items:flex-end'>"
+        + "<div style='flex:1'><label style='font-size:11px'>Szt.</label>"
         + "<input name='jaja_zebrane' type='number' min='0' value='"
         + (str(dzis["jaja_zebrane"]) if dzis else "")
-        + "' style='font-size:20px;text-align:center' required></div>"
-        + "<div><label>Data</label>"
-        + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:13px'></div>"
+        + "' style='font-size:16px;text-align:center;padding:6px' required></div>"
+        + "<div><label style='font-size:11px'>Data</label>"
+        + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:12px;padding:6px'></div>"
         + "</div>"
-        + "<button class='btn bg' style='width:100%;margin-top:10px;padding:11px'>Zapisz</button>"
+        + "<button class='btn bg' style='width:100%;margin-top:8px;padding:8px;font-size:13px'>Zapisz</button>"
         + "</form></div>"
     )
 
