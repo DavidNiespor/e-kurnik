@@ -60,6 +60,9 @@ def _card(title, sub, items, harm_cnt, btn=""):
 
 
 def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=""):
+    # Link do konfiguracji kafelków dashboardu
+    kafelki_btn = ("<div class='al alok' style='margin-bottom:12px'>""<b>Kafelki dashboardu</b> — przypisz kanaly GPIO/Supla do kafelkow sterowania. ""<a href='/sterowanie/kafelki' class='btn bp bsm'>Konfiguruj kafelki →</a>""</div>")
+
     lok  = [k for k in kanaly if (k["tryb"] or "") in ("rpi_gpio", "rpi_siec", "esphome")]
     supl = [k for k in kanaly if (k["tryb"] or "") in ("supla", "supla+rpi")]
     rucz = [k for k in kanaly if not (k["tryb"] or "").strip() or k["tryb"] == "reczny"]
@@ -78,7 +81,7 @@ def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=""):
     )
 
     html = (
-        "<h1>Sterowanie</h1>"
+        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'><h1 style='margin:0'>Sterowanie</h1><a href='/sterowanie/kafelki' class='btn bp bsm'>⚙ Kafelki dashboardu</a></div>"
         "<div style='display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap'>"
         "<a href='/gpio' class='btn bp bsm'>⚡ Przekaźniki</a>"
         "<a href='/harmonogramy' class='btn bo bsm'>⏰ Harmonogramy</a>"
@@ -134,4 +137,4 @@ def render_sterowanie(g, kanaly, harm_cnt, supla_ok, _TRYBY, R, extra_html=""):
         "Kliknij ⚙ przy kanale aby zmienić tryb.</p>"
         "</div></details>"
     )
-    return R(extra_html + html, "gpio")
+    return R(kafelki_btn + extra_html + html, "gpio")

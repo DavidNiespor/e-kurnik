@@ -873,6 +873,7 @@ def register_routes(app):
         )
         return R(html, "gpio")
 
+
     @app.route("/sterowanie/cmd", methods=["POST"])
     @farm_required
     def sterowanie_cmd():
@@ -3050,5 +3051,107 @@ def register_routes(app):
             flash(f"Auto-wyłącz za {sek}s")
         return redirect("/harmonogramy")
 
+
+    @app.route("/sterowanie/kafelki", methods=["GET","POST"])
+    @farm_required
+    def sterowanie_kafelki():
+        g = gid(); db = get_db()
+        KAFELKI = [
+            ("swiatlo_kurnik",   "💡", "Swiatlo kurnik",   "swiatlo"),
+            ("swiatlo_obejscie", "💡", "Swiatlo obejscie", "swiatlo"),
+            ("swiatlo_gniazda",  "💡", "Swiatlo gniazda",  "swiatlo"),
+            ("wentylacja",       "💨", "Wentylacja",        "wentylacja"),
+            ("dozowanie_paszy",  "🌾", "Dozowanie paszy",   "pojenie"),
+            ("dozowanie_wody",   "💧", "Dozowanie wody",    "pojenie"),
+        ]
+        if request.method == "POST":
+            # Zbierz wszystkie przypisania per kategoria (jeden kafelek moze byc w wielu fkeys tej samej kategorii)
+            assignments = {}  # fkat -> (did_v, kan_v, tryb_v, supla_ch)
+            for fkey, _, _, fkat in KAFELKI:
+                val = request.form.get("kanal_"+fkey, "")
+                if not val:
+                    continue
+                if val.startswith("gpio:"):
+                    parts = val.split(":")
+                    assignments[fkat] = (int(parts[1]), parts[2], "rpi_siec", None)
+                elif val.startswith("supla:"):
+                    ch_id = int(val[6:])
+                    assignments[fkat] = (None, "supla_"+str(ch_id), "supla", ch_id)
+            # Wyczysc wszystkie kategorie i wstaw nowe
+            done_cats = set()
+            for _, _, _, fkat in KAFELKI:
+                if fkat not in done_cats:
+                    db.execute("DELETE FROM kanal_sterowanie WHERE gospodarstwo_id=? AND kategoria=?", (g, fkat))
+                    done_cats.add(fkat)
+            for fkat, (did_v, kan_v, tryb_v, supla_ch) in assignments.items():
+                db.execute("INSERT INTO kanal_sterowanie(gospodarstwo_id,urzadzenie_id,kanal,tryb,kategoria,supla_channel_id) VALUES(?,?,?,?,?,?)", (g, did_v, kan_v, tryb_v, fkat, supla_ch))
+            db.commit(); db.close()
+            flash("Kafelki zapisane.")
+            return redirect("/sterowanie/kafelki")
+
+        aktualne = {}
+        for row in db.execute("SELECT kategoria,urzadzenie_id,kanal,tryb,supla_channel_id FROM kanal_sterowanie WHERE gospodarstwo_id=?", (g,)).fetchall():
+            aktualne[row["kategoria"]] = dict(row)
+        gpio_opts = []
+        for u in db.execute("SELECT id,nazwa FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1", (g,)).fetchall():
+            for ch in db.execute("SELECT kanal,opis FROM urzadzenia_kanaly WHERE urzadzenie_id=?", (u["id"],)).fetchall():
+                gpio_opts.append({"val":"gpio:"+str(u["id"])+":"+ch["kanal"], "label":u["nazwa"]+" / "+(ch["opis"] or ch["kanal"])})
+        supla_opts = []
+        for s in db.execute("SELECT channel_id,nazwa FROM supla_config WHERE gospodarstwo_id=? AND aktywny=1", (g,)).fetchall():
+            supla_opts.append({"val":"supla:"+str(s["channel_id"]), "label":"☁ "+s["nazwa"]+" (ch:"+str(s["channel_id"])+")"})
+        db.close()
+
+        def build_select(fkey, cur_val):
+            o = "<option value=''>— brak —</option>"
+            if gpio_opts:
+                o += "<optgroup label='GPIO / ESP32'>"
+                for x in gpio_opts:
+                    o += "<option value='" + x["val"] + "'" + (" selected" if cur_val == x["val"] else "") + ">" + x["label"] + "</option>"
+                o += "</optgroup>"
+            if supla_opts:
+                o += "<optgroup label='Supla Cloud'>"
+                for x in supla_opts:
+                    o += "<option value='" + x["val"] + "'" + (" selected" if cur_val == x["val"] else "") + ">" + x["label"] + "</option>"
+                o += "</optgroup>"
+            return "<select name='kanal_" + fkey + "' style='font-size:13px'>" + o + "</select>"
+
+        rows_html = ""
+        for fkey, fico, flabel, fkat in KAFELKI:
+            cur = aktualne.get(fkat, {})
+            if cur.get("tryb") == "supla" and cur.get("supla_channel_id"):
+                cur_val = "supla:" + str(cur["supla_channel_id"])
+            elif cur.get("urzadzenie_id") and cur.get("kanal"):
+                cur_val = "gpio:" + str(cur["urzadzenie_id"]) + ":" + cur["kanal"]
+            else:
+                cur_val = ""
+            if cur_val.startswith("supla:"):
+                lbl = next((o["label"] for o in supla_opts if o["val"] == cur_val), cur_val)
+                badge = "<span class='badge b-purple'>" + lbl + "</span>"
+            elif cur_val.startswith("gpio:"):
+                lbl = next((o["label"] for o in gpio_opts if o["val"] == cur_val), cur_val)
+                badge = "<span class='badge b-green'>" + lbl + "</span>"
+            else:
+                badge = "<span class='badge b-gray'>brak</span>"
+            rows_html += (
+                "<tr><td style='font-size:20px;text-align:center'>" + fico + "</td>"
+                "<td style='font-weight:500'>" + flabel + "</td>"
+                "<td>" + badge + "</td>"
+                "<td>" + build_select(fkey, cur_val) + "</td></tr>"
+            )
+
+        info = "" if (gpio_opts or supla_opts) else "<div class='al alw' style='margin-bottom:12px'>Brak urzadzen. <a href='/urzadzenia/dodaj'>Dodaj ESP32</a> lub <a href='/supla/dodaj'>mapuj Supla</a>.</div>"
+        html = (
+            "<h1>Kafelki dashboardu</h1>"
+            "<p style='font-size:13px;color:#888;margin-bottom:12px'>Przypisz kanal GPIO lub Supla do kafelka na dashboardzie.</p>"
+            + info
+            + "<div class='card'><form method='POST'>"
+            "<div style='overflow-x:auto'><table style='font-size:13px'><thead><tr>"
+            "<th></th><th>Kafelek</th><th>Aktualne</th><th>Zmien na</th></tr></thead>"
+            "<tbody>" + rows_html + "</tbody></table></div>"
+            "<br><button class='btn bp' style='margin-top:12px'>Zapisz wszystkie</button>"
+            "<a href='/sterowanie' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+            "</form></div>"
+        )
+        return R(html, "gpio")
 
     return app
