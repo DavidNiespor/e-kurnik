@@ -73,9 +73,13 @@ def api_call(access_token, path, method="GET", body=None):
     )
     try:
         resp = urllib.request.urlopen(req, timeout=10)
-        return json.loads(resp.read())
+        body = resp.read()
+        return json.loads(body) if body.strip() else {"ok": True}
     except urllib.error.HTTPError as e:
-        return {"error": e.code, "msg": e.read().decode()}
+        body = e.read().decode(errors="replace")
+        return {"error": e.code, "msg": body}
+    except Exception as e:
+        return {"error": "network", "msg": str(e)}
 
 
 def get_channels(access_token):

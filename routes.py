@@ -241,23 +241,45 @@ def register_routes(app):
         if kanal and str(kanal).startswith("supla_"):
             try:
                 ch_id = int(str(kanal).replace("supla_", ""))
-                from supla_oauth import set_channel_state
+            except ValueError:
+                return False, "Nieprawidlowy kanal Supla: " + str(kanal)
+            try:
+                from supla_oauth import api_call, refresh_token
                 db = get_db()
-                row = db.execute(
-                    "SELECT wartosc FROM ustawienia WHERE klucz='supla_access_token' AND gospodarstwo_id=?",
-                    (g,)).fetchone()
+                tok_row  = db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_access_token' AND gospodarstwo_id=?", (g,)).fetchone()
+                ref_row  = db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_refresh_token' AND gospodarstwo_id=?", (g,)).fetchone()
+                exp_row  = db.execute("SELECT wartosc FROM ustawienia WHERE klucz='supla_token_expires' AND gospodarstwo_id=?", (g,)).fetchone()
                 db.close()
-                if not row or not row["wartosc"]: return False, "Brak tokenu Supla — połącz w Sterowanie → Supla"
-                result = set_channel_state(row["wartosc"], ch_id, bool(stan))
+                if not tok_row or not tok_row["wartosc"]:
+                    return False, "Brak tokenu Supla — polacz w /supla"
+                access_token = tok_row["wartosc"]
+                # Odswiez token jesli wygasl
+                if exp_row and ref_row:
+                    try:
+                        from datetime import datetime, timedelta
+                        exp_dt = datetime.fromisoformat(exp_row["wartosc"])
+                        if datetime.now() >= exp_dt - timedelta(minutes=5):
+                            new_tok = refresh_token(ref_row["wartosc"])
+                            if "access_token" in new_tok:
+                                from db import save_setting
+                                access_token = new_tok["access_token"]
+                                save_setting("supla_access_token", access_token, g)
+                                save_setting("supla_refresh_token", new_tok.get("refresh_token",""), g)
+                                from datetime import timedelta as td
+                                exp2 = (datetime.now() + td(seconds=int(new_tok.get("expires_in",3600)))).isoformat()
+                                save_setting("supla_token_expires", exp2, g)
+                    except Exception:
+                        pass
+                result = api_call(access_token, f"/channels/{ch_id}", method="PATCH", body={"action": "TURN_ON" if stan else "TURN_OFF"})
                 ok = "error" not in result
                 if ok:
-                    db2 = get_db()
-                    db2.execute("UPDATE supla_config SET ostatni_stan=? WHERE channel_id=? AND gospodarstwo_id=?",
+                    db3 = get_db()
+                    db3.execute("UPDATE supla_config SET ostatni_stan=? WHERE channel_id=? AND gospodarstwo_id=?",
                                (1 if stan else 0, ch_id, g))
-                    db2.commit(); db2.close()
-                return ok, ("OK" if ok else str(result.get("msg","Błąd Supla")))
+                    db3.commit(); db3.close()
+                return ok, ("OK" if ok else "Supla error " + str(result.get("error","")) + ": " + str(result.get("msg",""))[:120])
             except Exception as e:
-                return False, str(e)
+                return False, "Supla exception: " + str(e)
         # Bezposrednie GPIO RPi: kanal = "rpi_pin:17"
         if kanal and str(kanal).startswith("rpi_pin:"):
             try:
