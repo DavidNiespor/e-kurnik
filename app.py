@@ -613,8 +613,9 @@ def health():
 # ─── HELPER: kafelki czynności dla dashboardu ─────────────────────────────────
 _CZYN_DEF = [
     ("poidla","Poidła","💧"),("karmidla","Karmidła","🌾"),("pasza","Pasza","🌽"),
-    ("jaja","Jaja","🥚"),("scioka","Ściółka","🏚"),("leki","Witaminy","💊"),
+    ("jaja","Jaja","🥚"),("scioka","Ściółka","🏕"),("leki","Witaminy","💊"),
     ("bramka","Bramka","🚪"),("posprzatan","Sprzątanie","🧹"),
+    ("przeglad","Przegląd","🔍"),("dezynf","Dezynf.","🧴"),
 ]
 
 def _kafelki_czynnosci(g, db_cz=None):
@@ -622,11 +623,20 @@ def _kafelki_czynnosci(g, db_cz=None):
         db_cz = get_db()
     d = date.today().isoformat()
     wpis = db_cz.execute(
-        "SELECT czynnosci FROM dzienne_czynnosci WHERE gospodarstwo_id=? AND data=?",
+        "SELECT czynnosci, notatka FROM dzienne_czynnosci WHERE gospodarstwo_id=? AND data=?",
         (g, d)
     ).fetchone()
+    # Pasza i woda dziś
+    media = db_cz.execute(
+        "SELECT COALESCE(SUM(pasza_wydana_kg),0) as p, 0 as w FROM produkcja WHERE gospodarstwo_id=? AND data=?",
+        (g, d)).fetchone()
+    woda_r = db_cz.execute(
+        "SELECT COALESCE(SUM(litry),0) as w FROM woda_reczna WHERE gospodarstwo_id=? AND data=?",
+        (g, d)).fetchone()
     db_cz.close()
     zaznaczone = json.loads(wpis["czynnosci"]) if wpis else []
+    pasza_dzis = float(media["p"] or 0)
+    woda_dzis  = float(woda_r["w"] or 0)
     n_ok  = len(zaznaczone)
     n_all = len(_CZYN_DEF)
     pct   = round(n_ok / n_all * 100) if n_all else 0
@@ -638,13 +648,22 @@ def _kafelki_czynnosci(g, db_cz=None):
         chk = "checked" if on else ""
         cls = "tile tile-on" if on else "tile"
         onchange = "this.closest('label').classList.toggle('tile-on',this.checked)"
+        # Dla paszy i wody pokaz wartość
+        extra = ""
+        if k == "pasza":
+            c = "#3B6D11" if pasza_dzis > 0 else "#A32D2D"
+            extra = f"<div style='font-size:9px;color:{c};margin-top:1px'>{round(pasza_dzis,1)} kg</div>"
+        elif k in ("poidla","karmidla"):
+            c = "#3B6D11" if woda_dzis > 0 else "#A32D2D"
+            extra = f"<div style='font-size:9px;color:{c};margin-top:1px'>{round(woda_dzis,1)} L</div>"
         tiles += (
             f'<label style="cursor:pointer">'
             f'<input type="checkbox" name="cz" value="{k}" {chk}'
             f' style="display:none" onchange="{onchange}">'
             f'<div class="{cls}">'
-            f'<div style="font-size:22px;line-height:1">{ico}</div>'
-            f'<div style="font-size:11px;font-weight:500;margin-top:4px">{l}</div>'
+            f'<div style="font-size:20px;line-height:1">{ico}</div>'
+            f'<div style="font-size:10px;font-weight:600;margin-top:3px;line-height:1.2">{l}</div>'
+            f'{extra}'
             f'</div></label>'
         )
 
@@ -654,25 +673,40 @@ def _kafelki_czynnosci(g, db_cz=None):
     )
     return (
         '<style>'
-        '.tile{border:2px solid #e0ddd4;border-radius:12px;padding:10px 6px;text-align:center;'
-        'background:#fff;transition:border-color .15s,background .15s;min-height:72px;'
+        '.tile{border:2px solid #e0ddd4;border-radius:10px;padding:8px 4px;text-align:center;'
+        'background:#fff;transition:border-color .15s,background .15s;min-height:68px;'
         'display:flex;flex-direction:column;align-items:center;justify-content:center}'
         '.tile-on{border-color:#3B6D11!important;background:#EAF3DE!important}'
-        '.tiles-g{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}'
-        '@media(max-width:700px){.tiles-g{grid-template-columns:repeat(4,1fr)}}'
+        '.tiles-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:6px}'
         '</style>'
         f'<div class="card" style="margin-bottom:10px">'
         f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
-        f'<b>Czynności dzienne</b>'
-        f'<div style="flex:1;background:#e0ddd4;border-radius:4px;height:6px">'
+        f'<b>Czynności</b>'
+        f'<div style="flex:1;background:#e0ddd4;border-radius:4px;height:5px">'
         f'<div style="{bar_style}"></div></div>'
-        f'<span style="font-size:13px;color:{kolor};font-weight:500">{n_ok}/{n_all}</span>'
+        f'<span style="font-size:12px;color:{kolor};font-weight:600">{n_ok}/{n_all}</span>'
+        f'<a href="/czynnosci" style="font-size:11px;color:#534AB7">hist →</a>'
         f'</div>'
         f'<form method="POST" action="/dashboard-czynnosci">'
         f'<div class="tiles-g">{tiles}</div>'
-        f'<button type="submit" class="btn bg bsm" style="margin-top:10px;width:100%">Zapisz</button>'
-        f'</form></div>'
+        f'<div style="display:flex;gap:8px;margin-top:10px;align-items:center">'
+        f'<div style="flex:1;display:flex;gap:6px">'
+        f'<div style="flex:1"><label style="font-size:11px;color:#888">🌾 Pasza (kg)</label>'
+        f'<input name="pasza_kg" type="number" step="0.1" min="0" value="{round(pasza_dzis,1) if pasza_dzis else ""}" placeholder="0.0"'
+        f' style="font-size:14px;text-align:center;padding:5px" form="czyn-form"></div>'
+        f'<div style="flex:1"><label style="font-size:11px;color:#888">💧 Woda (L)</label>'
+        f'<input name="woda_l" type="number" step="0.5" min="0" value="{round(woda_dzis,1) if woda_dzis else ""}" placeholder="0.0"'
+        f' style="font-size:14px;text-align:center;padding:5px" form="czyn-form"></div>'
+        f'</div>'
+        f'<button type="submit" class="btn bg bsm" style="align-self:flex-end;padding:9px 16px">Zapisz</button>'
+        f'</div>'
+        f'</form>'
+        f'<form id="czyn-form" method="POST" action="/dzienne/media">'
+        f'<input type="hidden" name="data" value="{d}">'
+        f'</form>'
+        f'</div>'
     )
+
 
 
 @app.route("/produkcja/dodaj", methods=["POST"])
@@ -772,32 +806,39 @@ def dashboard():
         did = row["urzadzenie_id"]
         ico = row["kafelek_ikona"] or "⚡"
         lbl = row["kafelek_nazwa"] or kan or "?"
-        bc  = "#3B6D11" if on else "#7F77DD"
-        bg  = "#f4faf0" if on else "#fff"
+        bc  = "#3B6D11" if on else "#534AB7"
+        bg  = "#f4faf0" if on else "#f8f8ff"
+        brd = "3px" if on else "2px"
         ns  = "false" if on else "true"
-        oc  = ("tR(" + (str(did) if did else "null") + ",'" + str(kan) + "'," + ns + ")")
-        st  = ("<span style='color:#3B6D11;font-size:9px;font-weight:700'>● ON</span>" if on
-               else "<span style='color:#aaa;font-size:9px'>○ OFF</span>")
+        oc  = "tR(" + (str(did) if did else "null") + ",'" + str(kan) + "'," + ns + ")"
+        st  = ("<div style='font-size:8px;color:#3B6D11;font-weight:700;margin-top:2px'>● ON</div>" if on
+               else "<div style='font-size:8px;color:#aaa;margin-top:2px'>○ OFF</div>")
         return (
-            "<div style='border:2px solid " + bc + ";border-radius:8px;padding:7px 3px;"
+            "<div style='border:" + brd + " solid " + bc + ";border-radius:10px;padding:8px 4px;"
             "text-align:center;background:" + bg + ";cursor:pointer;transition:all .12s;"
-            "touch-action:manipulation;min-width:0' onclick=\"" + oc + "\">" 
-            "<div style='font-size:18px;line-height:1'>" + ico + "</div>"
-            "<div style='font-size:9px;font-weight:600;margin-top:3px;color:#2c2c2a;"
-            "line-height:1.2;word-break:break-word;padding:0 2px'>" + lbl + "</div>"
-            "<div style='margin-top:2px'>" + st + "</div>"
+            "touch-action:manipulation;user-select:none' onclick=\"" + oc + "\"\n"
+            "onmousedown=\"this.style.transform='scale(.95)'\" "
+            "onmouseup=\"this.style.transform=''\">"
+            "<div style='font-size:20px;line-height:1'>" + ico + "</div>"
+            "<div style='font-size:10px;font-weight:600;margin-top:3px;color:#2c2c2a;"
+            "line-height:1.2;word-break:break-word'>" + lbl + "</div>"
+            + st +
             "</div>"
         )
 
     kafelki_ster = "".join(_kaf_row(r) for r in _kaf_rows)
+    # Zuzycia kafelek - pokazuje pasza/woda z aktualnym stanem
+    _pasza_ok = pasza_dzis > 0
+    _woda_ok  = woda_dzis  > 0
     zuzycia_kaf = (
-        "<div style='border:2px solid #e0ddd4;border-radius:10px;padding:10px 4px;background:#fff;min-width:0;overflow:hidden'>"
-        "<div style='font-size:20px;text-align:center'>📊</div>"
-        "<div style='font-size:10px;font-weight:600;text-align:center;margin-top:4px;color:#2c2c2a'>Zużycia dziś</div>"
-        "<div style='margin-top:6px;font-size:11px'>"
-        "<div style='display:flex;justify-content:space-between;padding:2px'><span>💧</span><b>" + str(round(woda_dzis,1)) + " L</b></div>"
-        "<div style='display:flex;justify-content:space-between;padding:2px'><span>🌾</span><b>" + str(round(pasza_dzis,1)) + " kg</b></div>"
-        "<div style='display:flex;justify-content:space-between;padding:2px'><span>⚡</span><b>" + str(round(prad_dzis,2)) + " kWh</b></div>"
+        "<div style='border:2px solid #e0ddd4;border-radius:10px;padding:8px 4px;"
+        "background:#fff;min-width:0;text-align:center'>"
+        "<div style='font-size:18px'>📊</div>"
+        "<div style='font-size:9px;font-weight:600;color:#5f5e5a;margin-top:2px'>Dziś</div>"
+        "<div style='font-size:10px;margin-top:4px;line-height:1.6'>"
+        "<div style='color:" + ("#3B6D11" if _woda_ok else "#A32D2D") + "'>💧 " + str(round(woda_dzis,1)) + " L</div>"
+        "<div style='color:" + ("#3B6D11" if _pasza_ok else "#A32D2D") + "'>🌾 " + str(round(pasza_dzis,1)) + " kg</div>"
+        "<div style='color:#888'>⚡ " + str(round(prad_dzis,2)) + " kWh</div>"
         "</div></div>"
     )
 
@@ -809,9 +850,8 @@ def dashboard():
         "<a href='/sterowanie/kafelki' style='font-size:12px;color:#534AB7'>⚙ Kafelki</a>"
         "<a href='/sterowanie' style='font-size:12px;color:#888'>Panel →</a></div>"
         "</div>"
-        "<style>.ster-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}"
-        "@media(max-width:720px){.ster-grid{grid-template-columns:repeat(4,1fr)}}"
-        "@media(max-width:480px){.ster-grid{grid-template-columns:repeat(4,1fr)}}</style>"
+        "<style>.ster-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px}"
+        "</style>"
         "<div class='ster-grid'>"
         + kafelki_ster + zuzycia_kaf +
         "</div>"
@@ -911,19 +951,7 @@ def dashboard():
             '</form></div>'
         ))()
 
-        # Formularz 3: Pasza + Woda
-        + '<div class="card" style="margin-top:4px">'
-        + '<b>Pasza i woda — dziś</b>'
-        + '<form method="POST" action="/dzienne/media" style="margin-top:10px">'
-        + '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-        + '<div class="g2">'
-        + '<div><label>Pasza dodana (kg)</label>'
-        + '<input name="pasza_kg" type="number" step="0.1" min="0" placeholder="kg"></div>'
-        + '<div><label>Woda dolana (litry)</label>'
-        + '<input name="woda_l" type="number" step="0.5" min="0" placeholder="L"></div>'
-        + '</div>'
-        + '<button class="btn bo bsm" style="margin-top:8px">Zapisz mediów</button>'
-        + '</form></div>'
+        # Pasza i woda wbudowane w czynnosci
     )
     return R(html, "dash")
 
