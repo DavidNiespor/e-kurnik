@@ -236,6 +236,52 @@ def register_routes(app):
     _init()
 
     # ─── HELPER send_cmd ──────────────────────────────────────────────────────
+    def _gpio_set(pin, stan, g=None, kanal_key=None):
+        """Ustaw pin GPIO. Kolejnosc: pigpio (TCP daemon) -> lgpio -> RPi.GPIO."""
+        # 1. pigpio przez TCP - dziala w Docker gdy 'sudo pigpiod' na hoscie
+        try:
+            import pigpio
+            pi = pigpio.pi("localhost", 8888)
+            if pi.connected:
+                pi.set_mode(pin, pigpio.OUTPUT)
+                pi.write(pin, 1 if stan else 0)
+                pi.stop()
+                return True, "pigpio pin" + str(pin) + " = " + ("ON" if stan else "OFF")
+            pi.stop()
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        # 2. lgpio - dziala w Docker z /dev/gpiochip0 w devices
+        try:
+            import lgpio
+            h = lgpio.gpiochip_open(0)
+            lgpio.gpio_claim_output(h, pin)
+            lgpio.gpio_write(h, pin, 1 if stan else 0)
+            lgpio.gpiochip_close(h)
+            return True, "lgpio pin" + str(pin) + " = " + ("ON" if stan else "OFF")
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        # 3. RPi.GPIO - tylko poza Docker
+        try:
+            import RPi.GPIO as GPIO
+            GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
+            return True, "RPi.GPIO pin" + str(pin) + " = " + ("ON" if stan else "OFF")
+        except ImportError:
+            pass
+        except Exception as e:
+            return False, "GPIO error: " + str(e)
+        return False, (
+            "Brak sterownika GPIO. W Docker uruchom na hoscie: sudo pigpiod "
+            "  LUB dodaj do docker-compose 'devices: [/dev/gpiochip0:/dev/gpiochip0]' "
+            "i pip install lgpio"
+        )
+
+
     def _send(did, kanal, stan, g):
         # Supla: kanal zaczyna sie od "supla_"
         if kanal and str(kanal).startswith("supla_"):
@@ -313,21 +359,7 @@ def register_routes(app):
                 pin = int(str(kanal).split(":")[1])
             except (IndexError, ValueError):
                 return False, "Nieprawidlowy format kanalu RPi: " + str(kanal)
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setwarnings(False)
-                GPIO.setup(pin, GPIO.OUT)
-                GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
-                db = get_db()
-                db.execute("UPDATE kanal_sterowanie SET gpio_pin=? WHERE gospodarstwo_id=? AND kanal=?",
-                           (pin, g, kanal))
-                db.commit(); db.close()
-                return True, "GPIO BCM" + str(pin) + " = " + ("ON" if stan else "OFF")
-            except ImportError:
-                return False, "RPi.GPIO niedostepne — app nie dziala na RPi lub brak biblioteki"
-            except Exception as e:
-                return False, "GPIO error: " + str(e)
+            return _gpio_set(pin, bool(stan))
         # GPIO / ESPHome / Node-RED przez siec, lub lokalny RPi GPIO
         db = get_db()
         dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
@@ -344,16 +376,7 @@ def register_routes(app):
             try: pin = int(pin_str)
             except ValueError: db.close(); return False, "Pin BCM nieznany dla kanalu " + kanal + " — ustaw nr pinu w opisie kanalu"
             db.close()
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-                GPIO.setup(pin, GPIO.OUT)
-                GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
-                return True, "GPIO BCM" + str(pin) + " = " + ("ON" if stan else "OFF")
-            except ImportError:
-                return False, "RPi.GPIO niedostepne — zainstaluj: pip install RPi.GPIO"
-            except Exception as e:
-                return False, "GPIO error: " + str(e)
+            return _gpio_set(pin, bool(stan))
 
         # Node-RED — HTTP endpoint per kanal
         if typ == "nodered":

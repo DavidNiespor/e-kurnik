@@ -111,26 +111,28 @@ def ping_device(urzadzenie_id, gid):
 
     # Lokalny RPi — sprawdź GPIO (zawsze online)
     if dev["typ"] == "rpi_local":
+        # Sprawdz pigpio (TCP daemon na hoscie)
+        gpio_ok = False
         try:
-            import RPi.GPIO as GPIO
-            # Odczytaj stany pinów z opis kanałów
-            chs = db.execute("SELECT kanal,opis,stan FROM urzadzenia_kanaly WHERE urzadzenie_id=?", (urzadzenie_id,)).fetchall()
-            GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-            for ch in chs:
-                pin_str = (ch["opis"] or "").replace("GPIO","").strip()
-                try:
-                    pin = int(pin_str)
-                    GPIO.setup(pin, GPIO.OUT)
-                    val = GPIO.input(pin)
-                    db.execute("UPDATE urzadzenia_kanaly SET stan=? WHERE urzadzenie_id=? AND kanal=?", (val, urzadzenie_id, ch["kanal"]))
-                except (ValueError, Exception): pass
-            db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status='online' WHERE id=?", (now, urzadzenie_id))
-            db.commit(); db.close()
-            return True, "RPi GPIO online"
-        except ImportError:
-            db.execute("UPDATE urzadzenia SET status='offline' WHERE id=?", (urzadzenie_id,))
-            db.commit(); db.close()
-            return False, "RPi.GPIO niedostepne"
+            import pigpio
+            pi = pigpio.pi("localhost", 8888)
+            gpio_ok = pi.connected
+            if gpio_ok:
+                chs = db.execute("SELECT kanal,opis,stan FROM urzadzenia_kanaly WHERE urzadzenie_id=?", (urzadzenie_id,)).fetchall()
+                for ch in chs:
+                    pin_str = (ch["opis"] or "").replace("GPIO","").strip()
+                    try:
+                        pin = int(pin_str)
+                        val = pi.read(pin)
+                        db.execute("UPDATE urzadzenia_kanaly SET stan=? WHERE urzadzenie_id=? AND kanal=?", (val, urzadzenie_id, ch["kanal"]))
+                    except Exception: pass
+            pi.stop()
+        except Exception: pass
+        status = "online" if gpio_ok else "offline"
+        msg = "pigpio OK" if gpio_ok else "pigpiod niedostepny — uruchom: sudo pigpiod na hoscie"
+        db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status=? WHERE id=?", (now, status, urzadzenie_id))
+        db.commit(); db.close()
+        return gpio_ok, msg
 
     # Node-RED — odczyt stanu przez /api/status
     if dev["typ"] == "nodered":
