@@ -237,8 +237,22 @@ def register_routes(app):
 
     # ─── HELPER send_cmd ──────────────────────────────────────────────────────
     def _gpio_set(pin, stan, g=None, kanal_key=None):
-        """Ustaw pin GPIO. Kolejnosc: pigpio (TCP daemon) -> lgpio -> RPi.GPIO."""
-        # 1. pigpio przez TCP - dziala w Docker gdy 'sudo pigpiod' na hoscie
+        """Ustaw pin GPIO. lgpio -> pigpio TCP -> RPi.GPIO."""
+        # 1. lgpio (apt: sudo apt install python3-lgpio)
+        #    docker-compose: devices: [/dev/gpiochip0:/dev/gpiochip0]
+        try:
+            import lgpio
+            h = lgpio.gpiochip_open(0)
+            lgpio.gpio_claim_output(h, pin)
+            lgpio.gpio_write(h, pin, 1 if stan else 0)
+            lgpio.gpiochip_close(h)
+            return True, "lgpio pin" + str(pin) + " = " + ("ON" if stan else "OFF")
+        except ImportError:
+            pass
+        except Exception as e:
+            if "gpiochip" in str(e).lower() or "permission" in str(e).lower():
+                return False, "lgpio: brak /dev/gpiochip0 - dodaj do docker-compose devices: [/dev/gpiochip0:/dev/gpiochip0]"
+        # 2. pigpio przez TCP (sudo pigpiod na hoscie)
         try:
             import pigpio
             pi = pigpio.pi("localhost", 8888)
@@ -252,19 +266,7 @@ def register_routes(app):
             pass
         except Exception:
             pass
-        # 2. lgpio - dziala w Docker z /dev/gpiochip0 w devices
-        try:
-            import lgpio
-            h = lgpio.gpiochip_open(0)
-            lgpio.gpio_claim_output(h, pin)
-            lgpio.gpio_write(h, pin, 1 if stan else 0)
-            lgpio.gpiochip_close(h)
-            return True, "lgpio pin" + str(pin) + " = " + ("ON" if stan else "OFF")
-        except ImportError:
-            pass
-        except Exception:
-            pass
-        # 3. RPi.GPIO - tylko poza Docker
+        # 3. RPi.GPIO (tylko poza Docker)
         try:
             import RPi.GPIO as GPIO
             GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
@@ -276,11 +278,10 @@ def register_routes(app):
         except Exception as e:
             return False, "GPIO error: " + str(e)
         return False, (
-            "Brak sterownika GPIO. W Docker uruchom na hoscie: sudo pigpiod "
-            "  LUB dodaj do docker-compose 'devices: [/dev/gpiochip0:/dev/gpiochip0]' "
-            "i pip install lgpio"
+            "Brak sterownika GPIO. "
+            "Rozwiazanie: sudo apt install python3-lgpio "
+            "i dodaj do docker-compose: devices: [/dev/gpiochip0:/dev/gpiochip0]"
         )
-
 
     def _send(did, kanal, stan, g):
         # Supla: kanal zaczyna sie od "supla_"
