@@ -17,6 +17,10 @@ services:
       - FERMA_DATA_DIR=/data
       - SECRET_KEY=${SECRET_KEY:-zmien-mnie}
       - TZ=Europe/Warsaw
+    devices:
+      - /dev/gpiochip0:/dev/gpiochip0
+    group_add:
+      - gpio
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
