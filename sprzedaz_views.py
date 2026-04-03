@@ -30,20 +30,27 @@ def register_sprzedaz(app):
             uwagi  = request.form.get("uwagi", "")
             kwota  = round(sprzed * cena, 2)
 
+            # Zapisz jako osobna transakcja (wiele per dzien)
+            db.execute(
+                "INSERT INTO sprzedaz_szczegol"
+                "(gospodarstwo_id,data,klient_id,zamowienie_id,ilosc,cena_szt,wartosc,typ,uwagi)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (g, d, kid, zid, sprzed, cena, kwota, typ, uwagi))
+            # Aktualizuj sumy w produkcja (magazyn jaj)
             ex = db.execute(
-                "SELECT id, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? AND data=?",
+                "SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?",
                 (g, d)).fetchone()
             if ex:
                 db.execute(
-                    "UPDATE produkcja SET jaja_sprzedane=?,cena_sprzedazy=?,"
-                    "klient_id=?,zamowienie_id=?,typ_sprzedazy=?,uwagi=? WHERE id=?",
-                    (sprzed, cena, kid, zid, typ, uwagi, ex["id"]))
+                    "UPDATE produkcja SET"
+                    " jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?),"
+                    " cena_sprzedazy=?,klient_id=?,typ_sprzedazy=? WHERE id=?",
+                    (g, d, cena, kid, typ, ex["id"]))
             else:
                 db.execute(
-                    "INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,"
-                    "jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,klient_id,zamowienie_id,typ_sprzedazy,uwagi)"
-                    " VALUES(?,?,0,?,?,0,?,?,?,?)",
-                    (g, d, sprzed, cena, kid, zid, typ, uwagi))
+                    "INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,klient_id,typ_sprzedazy)"
+                    " VALUES(?,?,0,?,?,0,?,?)",
+                    (g, d, sprzed, cena, kid, typ))
 
             if zid:
                 db.execute(
@@ -102,23 +109,21 @@ def register_sprzedaz(app):
             " ORDER BY z.data_dostawy", (g,)).fetchall()
         cena_def = gs("cena_jajka", "1.20")
 
-        # Historia sprzedaży (filtrowana)
         historia = db.execute("""
-            SELECT p.data, p.jaja_sprzedane, p.cena_sprzedazy, p.typ_sprzedazy, p.uwagi,
-                   k.id as kid, k.nazwa as kn,
-                   ROUND(p.jaja_sprzedane * COALESCE(p.cena_sprzedazy,0), 2) as kwota
-            FROM produkcja p
-            LEFT JOIN klienci k ON p.klient_id = k.id
-            WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane > 0
-              AND p.data >= ? AND p.data <= ?
-            ORDER BY p.data DESC""", (g, data_od, data_do)).fetchall()
+            SELECT s.id, s.data, s.ilosc as jaja_sprzedane, s.cena_szt as cena_sprzedazy,
+                   s.typ as typ_sprzedazy, s.uwagi, s.wartosc as kwota,
+                   k.id as kid, k.nazwa as kn
+            FROM sprzedaz_szczegol s
+            LEFT JOIN klienci k ON s.klient_id = k.id
+            WHERE s.gospodarstwo_id=? AND s.data >= ? AND s.data <= ?
+            ORDER BY s.data DESC, s.id DESC""", (g, data_od, data_do)).fetchall()
 
         # Statystyki w zakresie
         stat_zakres = db.execute(
-            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
-            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as przychod"
-            " FROM produkcja WHERE gospodarstwo_id=?"
-            " AND jaja_sprzedane>0 AND data>=? AND data<=?",
+            "SELECT COALESCE(SUM(ilosc),0) as szt,"
+            " COALESCE(SUM(wartosc),0) as przychod"
+            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
+            " AND data>=? AND data<=?",
             (g, data_od, data_do)).fetchone()
 
         koszty_zakres = db.execute(
@@ -128,11 +133,10 @@ def register_sprzedaz(app):
 
         # Statystyki bieżący miesiąc (do kafelka)
         stat = db.execute(
-            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
-            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as kwota"
-            " FROM produkcja WHERE gospodarstwo_id=?"
-            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')"
-            " AND jaja_sprzedane>0", (g,)).fetchone()
+            "SELECT COALESCE(SUM(ilosc),0) as szt,"
+            " COALESCE(SUM(wartosc),0) as kwota"
+            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
+            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
 
         # Klienci z saldami
         klienci_saldo = db.execute("""
@@ -314,7 +318,11 @@ def register_sprzedaz(app):
                 "<td>" + klink + "</td>"
                 "<td style='font-size:15px'>" + TYP_ICO.get(r["typ_sprzedazy"] or "", "?") + "</td>"
                 "<td style='font-size:11px;color:#888'>" + (r["uwagi"] or "") + "</td>"
-                "<td><a href='/sprzedaz/edytuj/" + r["data"] + "' class='btn bo bsm' style='font-size:11px'>Edytuj</a></td>"
+                "<td class='nowrap'>"
+                "<a href='/sprzedaz/edytuj/" + str(r['id']) + "' class='btn bo bsm' style='font-size:11px'>Edytuj</a> "
+                "<a href='/sprzedaz/usun/" + str(r['id']) + "' class='btn br bsm' style='font-size:11px' "
+                "onclick='return confirm(\"Usunac?\")'>-</a>"
+                "</td>"
                 "</tr>"
             )
 
@@ -412,24 +420,23 @@ def register_sprzedaz(app):
         )
         return R(html, "zam")
 
-    # ── Edycja wpisu sprzedaży ────────────────────────────────────────────
-    @app.route("/sprzedaz/edytuj/<data>", methods=["GET", "POST"])
+    # ── Edycja transakcji sprzedaży (po id) ─────────────────────────────
+    @app.route("/sprzedaz/edytuj/<int:sid>", methods=["GET", "POST"])
     @farm_required
-    def sprzedaz_edytuj(data):
+    def sprzedaz_edytuj(sid):
         g = gid(); db = get_db()
         r = db.execute(
-            "SELECT p.*, k.nazwa as kn FROM produkcja p"
-            " LEFT JOIN klienci k ON p.klient_id=k.id"
-            " WHERE p.gospodarstwo_id=? AND p.data=?", (g, data)).fetchone()
-        if not r: db.close(); flash("Nie znaleziono wpisu."); return redirect("/sprzedaz")
+            "SELECT s.*, k.nazwa as kn FROM sprzedaz_szczegol s"
+            " LEFT JOIN klienci k ON s.klient_id=k.id"
+            " WHERE s.id=? AND s.gospodarstwo_id=?", (sid, g)).fetchone()
+        if not r: db.close(); flash("Nie znaleziono."); return redirect("/sprzedaz")
 
         klienci = db.execute(
             "SELECT id, nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
         zamow = db.execute(
             "SELECT z.id, z.data_dostawy, z.ilosc, k.nazwa as kn FROM zamowienia z"
             " LEFT JOIN klienci k ON z.klient_id=k.id"
-            " WHERE z.gospodarstwo_id=? AND (z.status IN ('nowe','potwierdzone')"
-            " OR z.id=?)"
+            " WHERE z.gospodarstwo_id=? AND (z.status IN ('nowe','potwierdzone') OR z.id=?)"
             " ORDER BY z.data_dostawy", (g, r["zamowienie_id"] or 0)).fetchall()
 
         if request.method == "POST":
@@ -439,12 +446,19 @@ def register_sprzedaz(app):
             zid    = request.form.get("zamowienie_id") or None
             typ    = request.form.get("typ_sprzedazy", "gotowka")
             uwagi  = request.form.get("uwagi", "")
+            kwota  = round(sprzed * cena, 2)
             db.execute(
-                "UPDATE produkcja SET jaja_sprzedane=?,cena_sprzedazy=?,"
-                "klient_id=?,zamowienie_id=?,typ_sprzedazy=?,uwagi=? WHERE gospodarstwo_id=? AND data=?",
-                (sprzed, cena, kid, zid, typ, uwagi, g, data))
+                "UPDATE sprzedaz_szczegol SET ilosc=?,cena_szt=?,wartosc=?,"
+                "klient_id=?,zamowienie_id=?,typ=?,uwagi=? WHERE id=? AND gospodarstwo_id=?",
+                (sprzed, cena, kwota, kid, zid, typ, uwagi, sid, g))
+            # Aktualizuj sumy w produkcja
+            d = r["data"]
+            db.execute(
+                "UPDATE produkcja SET"
+                " jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?)"
+                " WHERE gospodarstwo_id=? AND data=?", (g, d, g, d))
             db.commit(); db.close()
-            flash("Zaktualizowano sprzedaż: " + data)
+            flash("Zaktualizowano sprzedaz.")
             return redirect("/sprzedaz")
 
         db.close()
@@ -452,42 +466,60 @@ def register_sprzedaz(app):
             "<option value='" + str(k["id"]) + "'"
             + (" selected" if r["klient_id"] == k["id"] else "") + ">"
             + k["nazwa"] + "</option>" for k in klienci)
-        zam_opt = "<option value=''>— bez zamówienia —</option>" + "".join(
+        zam_opt = "<option value=''>— bez zamowienia —</option>" + "".join(
             "<option value='" + str(z["id"]) + "'"
             + (" selected" if r["zamowienie_id"] == z["id"] else "") + ">"
-            + z["data_dostawy"] + " · " + (z["kn"] or "?") + " · " + str(z["ilosc"]) + " szt."
+            + z["data_dostawy"] + " - " + (z["kn"] or "?") + " - " + str(z["ilosc"]) + " szt."
             + "</option>" for z in zamow)
-        TYP = [("gotowka","💵 Gotówka"),("przelew","🏦 Przelew"),
-               ("nastepnym_razem","⏳ Następnym razem"),("z_salda","📋 Z salda")]
+        TYP = [("gotowka","Gotowka"),("przelew","Przelew"),
+               ("nastepnym_razem","Nastepnym razem"),("z_salda","Z salda")]
         typ_opt = "".join(
-            "<option value='" + v + "'" + (" selected" if r["typ_sprzedazy"]==v else "") + ">" + l + "</option>"
+            "<option value='" + v + "'" + (" selected" if r["typ"]==v else "") + ">" + l + "</option>"
             for v,l in TYP)
 
         html = (
-            "<h1>Edycja sprzedaży — " + data + "</h1>"
+            "<h1>Edycja sprzedazy — " + r["data"] + "</h1>"
             "<div class='card'><form method='POST'>"
             "<div class='g3'>"
             "<div><label>Sprzedane (szt)</label>"
             "<input name='jaja_sprzedane' type='number' min='0' required"
-            " value='" + str(r["jaja_sprzedane"]) + "'"
+            " value='" + str(r["ilosc"]) + "'"
             " style='font-size:20px;text-align:center'></div>"
-            "<div><label>Cena/szt (zł)</label>"
+            "<div><label>Cena/szt (zl)</label>"
             "<input name='cena_sprzedazy' type='number' step='0.01' min='0'"
-            " value='" + str(r["cena_sprzedazy"] or "") + "'"
+            " value='" + str(r["cena_szt"] or "") + "'"
             " style='font-size:20px;text-align:center'></div>"
             "<div><label>Data</label>"
-            "<input type='text' value='" + data + "' disabled style='background:#f5f5f0'></div>"
+            "<input type='text' value='" + r["data"] + "' disabled style='background:#f5f5f0'></div>"
             "</div>"
             "<div class='g2'>"
             "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
-            "<div><label>Typ płatności</label><select name='typ_sprzedazy'>" + typ_opt + "</select></div>"
+            "<div><label>Typ platnosci</label><select name='typ_sprzedazy'>" + typ_opt + "</select></div>"
             "</div>"
-            "<div><label>Zamówienie</label><select name='zamowienie_id'>" + zam_opt + "</select></div>"
+            "<div><label>Zamowienie</label><select name='zamowienie_id'>" + zam_opt + "</select></div>"
             "<div><label>Uwagi</label><input name='uwagi' value='" + (r["uwagi"] or "") + "'></div>"
             "<br><button class='btn bp' style='margin-top:12px'>Zapisz</button>"
             "<a href='/sprzedaz' class='btn bo' style='margin-left:8px'>Anuluj</a>"
             "</form></div>"
         )
         return R(html, "zam")
+
+    @app.route("/sprzedaz/usun/<int:sid>")
+    @farm_required
+    def sprzedaz_usun(sid):
+        g = gid(); db = get_db()
+        row = db.execute("SELECT data FROM sprzedaz_szczegol WHERE id=? AND gospodarstwo_id=?", (sid,g)).fetchone()
+        if row:
+            db.execute("DELETE FROM sprzedaz_szczegol WHERE id=? AND gospodarstwo_id=?", (sid, g))
+            d = row["data"]
+            # Aktualizuj sumy
+            db.execute(
+                "UPDATE produkcja SET"
+                " jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?)"
+                " WHERE gospodarstwo_id=? AND data=?", (g, d, g, d))
+            db.commit()
+        db.close()
+        flash("Transakcja usunieta.")
+        return redirect("/sprzedaz")
 
     return app

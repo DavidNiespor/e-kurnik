@@ -477,17 +477,16 @@ def register_routes(app):
         nies= round((p7["a"] or 0)/kur*100, 1) if kur else 0
         mag = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
         zarez = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
-        zysk = db.execute("SELECT COALESCE(SUM(jaja_sprzedane*cena_sprzedazy),0) as s FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
+        zysk = db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
         wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
         dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
         zam_d= db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
         urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
-        sprzed = db.execute("""SELECT p.data,p.jaja_sprzedane,p.cena_sprzedazy,
-            ROUND(p.jaja_sprzedane*p.cena_sprzedazy,2) as wartosc,
-            k.nazwa as kn, COALESCE(p.typ_sprzedazy,'gotowka') as typ_sprzedazy
-            FROM produkcja p LEFT JOIN klienci k ON p.klient_id=k.id
-            WHERE p.gospodarstwo_id=? AND p.jaja_sprzedane>0
-            ORDER BY p.data DESC LIMIT 5""", (g,)).fetchall()
+        sprzed = db.execute("""SELECT s.data,s.ilosc as jaja_sprzedane,s.cena_szt as cena_sprzedazy,
+            s.wartosc,k.nazwa as kn, COALESCE(s.typ,'gotowka') as typ_sprzedazy
+            FROM sprzedaz_szczegol s LEFT JOIN klienci k ON s.klient_id=k.id
+            WHERE s.gospodarstwo_id=?
+            ORDER BY s.data DESC, s.id DESC LIMIT 5""", (g,)).fetchall()
         db.close()
         pdz = float(gs("pasza_dzienna_kg", "6"))
         mag_stan = max(0, mag["p"] - mag["s"])
@@ -1272,7 +1271,7 @@ def register_routes(app):
         kur=db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'",(g,)).fetchone()["s"] or 1
         prod=db.execute("SELECT data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg,ROUND(CAST(jaja_zebrane AS REAL)/?*100,1) as niesnosc FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 90",(kur,g)).fetchall()
         wyd_kat=db.execute("SELECT kategoria,SUM(wartosc_total) as suma FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY kategoria ORDER BY suma DESC",(g,)).fetchall()
-        mies=db.execute("SELECT strftime('%Y-%m',data) as m,SUM(jaja_sprzedane*cena_sprzedazy) as p FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
+        mies=db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc) as p FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
         mies_w=db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc_total) as w FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
         db.close()
         prod_r=list(reversed(prod))

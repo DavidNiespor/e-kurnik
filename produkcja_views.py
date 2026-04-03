@@ -117,14 +117,13 @@ def register_produkcja(app):
             SELECT k.*,
                    COALESCE(ks.saldo_pln, 0) as saldo,
                    COUNT(DISTINCT p.data) as transakcji,
-                   COALESCE(SUM(CASE WHEN p.jaja_sprzedane>0
-                       THEN p.jaja_sprzedane*COALESCE(p.cena_sprzedazy,0) ELSE 0 END),0) as total_kwota,
+                   COALESCE((SELECT SUM(wartosc) FROM sprzedaz_szczegol ss WHERE ss.klient_id=k.id AND ss.gospodarstwo_id=?),0) as total_kwota,
                    MAX(p.data) as ostatnia_transakcja
             FROM klienci k
             LEFT JOIN konta_saldo ks ON ks.klient_id=k.id
             LEFT JOIN produkcja p ON p.klient_id=k.id AND p.gospodarstwo_id=?
             WHERE k.gospodarstwo_id=?
-            GROUP BY k.id ORDER BY k.nazwa""", (g, g)).fetchall()
+            GROUP BY k.id ORDER BY k.nazwa""", (g, g, g)).fetchall()
         db.close()
 
         rows_html = ""
