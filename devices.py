@@ -107,8 +107,50 @@ def ping_device(urzadzenie_id, gid):
                      (urzadzenie_id, gid)).fetchone()
     if not dev:
         db.close(); return False, "Brak urządzenia"
-    resp, err = _req(dev["ip"], dev["port"], "/api/status", api_key=dev["api_key"])
     now = datetime.now().isoformat()
+
+    # Lokalny RPi — sprawdź GPIO (zawsze online)
+    if dev["typ"] == "rpi_local":
+        try:
+            import RPi.GPIO as GPIO
+            # Odczytaj stany pinów z opis kanałów
+            chs = db.execute("SELECT kanal,opis,stan FROM urzadzenia_kanaly WHERE urzadzenie_id=?", (urzadzenie_id,)).fetchall()
+            GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+            for ch in chs:
+                pin_str = (ch["opis"] or "").replace("GPIO","").strip()
+                try:
+                    pin = int(pin_str)
+                    GPIO.setup(pin, GPIO.OUT)
+                    val = GPIO.input(pin)
+                    db.execute("UPDATE urzadzenia_kanaly SET stan=? WHERE urzadzenie_id=? AND kanal=?", (val, urzadzenie_id, ch["kanal"]))
+                except (ValueError, Exception): pass
+            db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status='online' WHERE id=?", (now, urzadzenie_id))
+            db.commit(); db.close()
+            return True, "RPi GPIO online"
+        except ImportError:
+            db.execute("UPDATE urzadzenia SET status='offline' WHERE id=?", (urzadzenie_id,))
+            db.commit(); db.close()
+            return False, "RPi.GPIO niedostepne"
+
+    # Node-RED — odczyt stanu przez /api/status
+    if dev["typ"] == "nodered":
+        # Próbuj GET /api/status -> {"relay1":true,"relay2":false,...}
+        resp, err = _req(dev["ip"], dev["port"], "/api/status", api_key=dev["api_key"])
+        if resp:
+            db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status='online' WHERE id=?", (now, urzadzenie_id))
+            # Obsłuż format: {"relay1":true} lub {"channels":{"relay1":true}}
+            channels = resp.get("channels", resp) if isinstance(resp, dict) else {}
+            for ch, val in channels.items():
+                if isinstance(val, bool):
+                    db.execute("UPDATE urzadzenia_kanaly SET stan=? WHERE urzadzenie_id=? AND kanal=?",
+                               (1 if val else 0, urzadzenie_id, ch))
+        else:
+            db.execute("UPDATE urzadzenia SET status='offline' WHERE id=?", (urzadzenie_id,))
+        db.commit(); db.close()
+        return bool(resp), err or "online"
+
+    # ESP32 / RPi slave — standardowy ping
+    resp, err = _req(dev["ip"], dev["port"], "/api/status", api_key=dev["api_key"])
     if resp:
         db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status='online' WHERE id=?", (now, urzadzenie_id))
         if "channels" in resp:

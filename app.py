@@ -2194,9 +2194,12 @@ def urzadzenia_dodaj():
     if request.method == "POST":
         db = get_db()
         n_ch = int(request.form.get("n_kanalow",4))
+        typ_v = request.form.get("typ","esp32")
+        ip_v  = request.form.get("ip","").strip() or ("localhost" if typ_v=="rpi_local" else "")
+        port_v = int(request.form.get("port",80) or 80)
         did = db.execute("INSERT INTO urzadzenia(gospodarstwo_id,nazwa,typ,ip,port,api_key) VALUES(?,?,?,?,?,?)",
-            (g, request.form["nazwa"], request.form.get("typ","esp32"),
-             request.form["ip"], request.form.get("port",80), request.form.get("api_key",""))).lastrowid
+            (g, request.form["nazwa"], typ_v, ip_v, port_v,
+             request.form.get("api_key",""))).lastrowid
         for i in range(1, n_ch+1):
             db.execute("INSERT INTO urzadzenia_kanaly(urzadzenie_id,kanal,opis) VALUES(?,?,?)",
                        (did, "relay"+str(i), "Przekaźnik "+str(i)))
@@ -2204,20 +2207,60 @@ def urzadzenia_dodaj():
         flash("Urządzenie dodane.")
         return redirect("/urzadzenia")
     html = (
-        '<h1>Nowe urządzenie</h1><div class="card"><form method="POST">'
-        '<label>Nazwa</label><input name="nazwa" required placeholder="np. ESP32 Kurnik A">'
+        '<h1>Nowe urządzenie</h1>'
+        '<div class="card"><form method="POST" id="nf">'
+        '<label>Nazwa</label>'
+        '<input name="nazwa" required placeholder="np. ESP32 Kurnik, RPi GPIO, Node-RED">'
+        '<label>Typ urządzenia</label>'
+        '<select name="typ" id="typ-sel" onchange="showTyp(this.value)">'
+        '<option value="esp32">📡 ESP32 (HTTP REST)</option>'
+        '<option value="esphome">🏠 ESPHome (HTTP)</option>'
+        '<option value="rpi">📡 RPi Slave (HTTP REST)</option>'
+        '<option value="rpi_local">🔌 Lokalny RPi GPIO (ten serwer)</option>'
+        '<option value="nodered">🔴 Node-RED (HTTP endpoint)</option>'
+        '</select>'
+        '<div id="sec-net" style="margin-top:8px">'
         '<div class="g2">'
-        '<div><label>Typ</label><select name="typ"><option value="esp32">ESP32</option><option value="rpi">RPi slave</option></select></div>'
-        '<div><label>Liczba kanałów relay</label><input name="n_kanalow" type="number" min="1" max="8" value="4"></div>'
+        '<div><label>Adres IP / hostname</label>'
+        '<input name="ip" placeholder="192.168.1.X lub nodered.local" id="ip-inp"></div>'
+        '<div><label>Port</label>'
+        '<input name="port" type="number" value="80" id="port-inp"></div>'
         '</div>'
-        '<div class="g2">'
-        '<div><label>Adres IP</label><input name="ip" required placeholder="192.168.1.X"></div>'
-        '<div><label>Port HTTP</label><input name="port" type="number" value="80"></div>'
+        '<label>API Key / Hasło (opcjonalne)</label>'
+        '<input name="api_key" placeholder="klucz API lub Bearer token">'
         '</div>'
-        '<label>API Key (zalecany)</label><input name="api_key" placeholder="np. ferma-esp32-klucz-123">'
-        '<br><button class="btn bp">Dodaj</button>'
+        '<div id="sec-rpi" style="display:none;margin-top:8px">'
+        '<div class="al alok" style="font-size:12px">GPIO sterowane bezpośrednio — app musi działać na tym RPi.</div>'
+        '<p style="font-size:12px;color:#888">Kanały dodasz po zapisaniu (każdy kanał = pin BCM).</p>'
+        '</div>'
+        '<div id="sec-nr" style="display:none;margin-top:8px">'
+        '<div class="al alok" style="font-size:12px">Node-RED: każdy kanał = osobny endpoint HTTP. '
+        'Stan odczytywany przez GET /api/status.</div>'
+        '<p style="font-size:12px;color:#888">Format URL: http://IP:PORT/api/[kanal]/on|off — '
+        'konfigurujesz per kanał po dodaniu.</p>'
+        '</div>'
+        '<div class="g2" style="margin-top:10px">'
+        '<div><label>Liczba kanałów relay</label>'
+        '<input name="n_kanalow" type="number" min="0" max="16" value="4" id="nk-inp"></div>'
+        '</div>'
+        '<br><button class="btn bp">Dodaj urządzenie</button>'
         '<a href="/urzadzenia" class="btn bo" style="margin-left:8px">Anuluj</a>'
         '</form></div>'
+        '<script>'
+        'function showTyp(t){'
+        '  var net=document.getElementById("sec-net");'
+        '  var rpi=document.getElementById("sec-rpi");'
+        '  var nr=document.getElementById("sec-nr");'
+        '  var ip=document.getElementById("ip-inp");'
+        '  var nk=document.getElementById("nk-inp");'
+        '  net.style.display=(t==="rpi_local")?"none":"block";'
+        '  rpi.style.display=(t==="rpi_local")?"block":"none";'
+        '  nr.style.display=(t==="nodered")?"block":"none";'
+        '  if(t==="rpi_local"){nk.value="0";ip.removeAttribute("required");}'
+        '  else if(t==="nodered"){if(ip)ip.setAttribute("required","");}'
+        '  else{if(ip)ip.setAttribute("required","");}'
+        '}'
+        '</script>'
     )
     return R(html, "urz")
 
@@ -2231,15 +2274,54 @@ def urzadzenia_panel(did):
     chs  = db.execute("SELECT * FROM urzadzenia_kanaly WHERE urzadzenie_id=? ORDER BY kanal", (did,)).fetchall()
     logi = db.execute("SELECT * FROM gpio_log WHERE urzadzenie_id=? ORDER BY czas DESC LIMIT 20", (did,)).fetchall()
     db.close()
-    ch_html = "".join(
-        '<div class="relay-card ' + ('relay-on' if ch["stan"] else '') + '">'
-        '<div onclick="sendCmd(' + str(did) + ',\'' + ch["kanal"] + '\',' + ('false' if ch["stan"] else 'true') + ')" style="cursor:pointer">'
-        '<div class="tog ' + ('on' if ch["stan"] else '') + '"></div>'
-        '<div style="font-size:12px;margin-top:6px;font-weight:500">' + ch["kanal"] + '</div>'
-        '<div style="font-size:11px;color:' + ('#3B6D11' if ch["stan"] else '#888') + '">' + ('ON' if ch["stan"] else 'OFF') + '</div>'
-        '</div></div>'
-        for ch in chs
-    )
+    ch_html = ""
+    for ch in chs:
+        on = bool(ch["stan"])
+        extra = ""
+        if dev["typ"] == "rpi_local":
+            extra = "<div style=\'font-size:10px;color:#888\'>pin " + (ch["opis"] or "?") + "</div>"
+        elif dev["typ"] == "nodered":
+            extra = "<div style=\'font-size:10px;color:#888\'>/"+ch["kanal"]+"</div>"
+        ch_html += (
+            "<div class=\'relay-card " + ("relay-on" if on else "") + "\'>"
+            "<div onclick=\'sendCmd(" + str(did) + ",\"" + ch["kanal"] + "\","
+            + ("false" if on else "true") + ")\'style=\'cursor:pointer\'>"
+            "<div class=\'tog " + ("on" if on else "") + "\'></div>"
+            "<div style=\'font-size:12px;margin-top:6px;font-weight:500\'>" + ch["kanal"] + "</div>"
+            + extra
+            + "<div style=\'font-size:11px;color:" + ("#3B6D11" if on else "#888") + "\'>" + ("ON" if on else "OFF") + "</div>"
+            "</div></div>"
+        )
+    # Edycja kanalow dla rpi_local i nodered
+    edit_ch_html = ""
+    if dev["typ"] in ("rpi_local", "nodered"):
+        _hint = "Opis = numer pinu BCM (np. 17)" if dev["typ"]=="rpi_local" else "Opis = endpoint Node-RED (np. relay1)"
+        _rows = ""
+        for ch in chs:
+            _rows += (
+                "<tr>"
+                "<td style=\'font-size:13px\'>" + ch["kanal"] + "</td>"
+                "<td><input name=\'opis_" + ch["kanal"] + "\' value=\'" + (ch["opis"] or "") + "\'"
+                " placeholder=\'pin BCM\' style=\'width:90px;font-size:13px;padding:4px\'></td>"
+                "<td><span class=\'badge " + ("b-green" if ch["stan"] else "b-gray") + "\'>"
+                + ("ON" if ch["stan"] else "OFF") + "</span></td>"
+                "<td><a href=\'/urzadzenia/" + str(did) + "/kanal/" + ch["kanal"] + "/del\'"
+                " class=\'btn br bsm\' onclick=\'return confirm(\"Usunąć?\")\'>✕</a></td>"
+                "</tr>"
+            )
+        edit_ch_html = (
+            "<div class=\'card\' style=\'margin-top:10px\'><b>Kanały — konfiguracja</b>"
+            "<p style=\'font-size:12px;color:#888;margin:6px 0\'>" + _hint + "</p>"
+            "<form method=\'POST\' action=\'/urzadzenia/" + str(did) + "/kanaly\'>"
+            "<table style=\'font-size:13px;width:100%\'><thead><tr>"
+            "<th>Kanał</th><th>Opis / Pin</th><th>Stan</th><th></th></tr></thead>"
+            "<tbody>" + _rows + "</tbody></table>"
+            "<div style=\'display:flex;gap:8px;margin-top:8px\'>"
+            "<button class=\'btn bp bsm\'>Zapisz</button>"
+            "<a href=\'/urzadzenia/" + str(did) + "/kanal/dodaj\' class=\'btn bo bsm\'>+ Dodaj kanał</a>"
+            "</div></form></div>"
+        )
+
     w_log = "".join(
         '<tr><td style="font-size:11px">' + l["czas"][:16] + '</td>'
         '<td>' + (l["kanal"] or "") + '</td>'
@@ -2259,7 +2341,8 @@ def urzadzenia_panel(did):
         '<thead><tr><th>Czas</th><th>Kanał</th><th>Stan</th><th>Źródło</th></tr></thead>'
         '<tbody>' + (w_log or '<tr><td colspan=4 style="color:#888;padding:10px">Brak</td></tr>') + '</tbody></table></div></div>'
         '<a href="/urzadzenia/' + str(did) + '/ping" class="btn bo bsm">Ping / odśwież status</a>'
-        '<script>'
+        + edit_ch_html
+        + '<script>'
         'function sendCmd(uid,ch,state){'
         'fetch("/sterowanie/cmd",{method:"POST",'
         'headers:{"Content-Type":"application/json"},'
@@ -2270,6 +2353,62 @@ def urzadzenia_panel(did):
         '}</script>'
     )
     return R(html, "urz")
+
+@app.route("/urzadzenia/<int:did>/kanaly", methods=["POST"])
+@farm_required
+def urzadzenia_kanaly_save(did):
+    g = gid(); db = get_db()
+    dev = db.execute("SELECT typ FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did,g)).fetchone()
+    if not dev: db.close(); return redirect("/urzadzenia")
+    for k, v in request.form.items():
+        if k.startswith("opis_"):
+            kanal = k[5:]
+            db.execute("UPDATE urzadzenia_kanaly SET opis=? WHERE urzadzenie_id=? AND kanal=?", (v.strip(), did, kanal))
+    db.commit(); db.close()
+    flash("Kanały zapisane.")
+    return redirect("/urzadzenia/"+str(did))
+
+
+@app.route("/urzadzenia/<int:did>/kanal/dodaj", methods=["GET","POST"])
+@farm_required
+def urzadzenia_kanal_dodaj(did):
+    g = gid(); db = get_db()
+    dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did,g)).fetchone()
+    if not dev: db.close(); return redirect("/urzadzenia")
+    if request.method == "POST":
+        kanal = request.form.get("kanal","").strip()
+        opis  = request.form.get("opis","").strip()
+        if kanal:
+            db.execute("INSERT OR IGNORE INTO urzadzenia_kanaly(urzadzenie_id,kanal,opis,stan) VALUES(?,?,?,0)", (did, kanal, opis))
+            db.commit()
+        db.close()
+        flash("Kanał dodany.")
+        return redirect("/urzadzenia/"+str(did))
+    db.close()
+    hint = "Numer pinu BCM (np. 17)" if dev["typ"]=="rpi_local" else "Nazwa endpointu Node-RED (np. relay1)"
+    html = (
+        "<h1>Nowy kanał — " + dev["nazwa"] + "</h1>"
+        "<div class='card'><form method='POST'>"
+        "<label>Klucz kanału</label>"
+        "<input name='kanal' required placeholder='np. relay1, pin17'>"
+        "<label>Opis / " + hint + "</label>"
+        "<input name='opis' placeholder='" + hint + "'>"
+        "<br><button class='btn bp'>Dodaj</button>"
+        "<a href='/urzadzenia/" + str(did) + "' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+        "</form></div>"
+    )
+    return R(html, "urz")
+
+
+@app.route("/urzadzenia/<int:did>/kanal/<kanal>/del")
+@farm_required
+def urzadzenia_kanal_del(did, kanal):
+    g = gid(); db = get_db()
+    db.execute("DELETE FROM urzadzenia_kanaly WHERE urzadzenie_id=? AND kanal=?", (did, kanal))
+    db.commit(); db.close()
+    flash("Kanał usunięty.")
+    return redirect("/urzadzenia/"+str(did))
+
 
 @app.route("/urzadzenia/cmd", methods=["POST"])
 @farm_required

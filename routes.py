@@ -328,16 +328,62 @@ def register_routes(app):
                 return False, "RPi.GPIO niedostepne — app nie dziala na RPi lub brak biblioteki"
             except Exception as e:
                 return False, "GPIO error: " + str(e)
-        # GPIO / ESPHome przez siec
+        # GPIO / ESPHome / Node-RED przez siec, lub lokalny RPi GPIO
         db = get_db()
         dev = db.execute("SELECT * FROM urzadzenia WHERE id=? AND gospodarstwo_id=?", (did, g)).fetchone()
         if not dev: db.close(); return False, "Brak urządzenia"
-        if dev["typ"] == "esphome":
+        typ = dev["typ"]
+
+        # Lokalny RPi — GPIO bez sieci
+        if typ == "rpi_local":
+            # kanal = "relay1" -> pin z urzadzenia_kanaly.opis lub mapowanie
+            ch_row = db.execute("SELECT opis FROM urzadzenia_kanaly WHERE urzadzenie_id=? AND kanal=?", (did, kanal)).fetchone()
+            # Opis kanalu to numer pinu BCM (np. "17" lub "GPIO17")
+            pin_str = (ch_row["opis"] if ch_row else "") or kanal
+            pin_str = pin_str.replace("GPIO","").replace("gpio","").strip()
+            try: pin = int(pin_str)
+            except ValueError: db.close(); return False, "Pin BCM nieznany dla kanalu " + kanal + " — ustaw nr pinu w opisie kanalu"
+            db.close()
+            try:
+                import RPi.GPIO as GPIO
+                GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+                GPIO.setup(pin, GPIO.OUT)
+                GPIO.output(pin, GPIO.HIGH if stan else GPIO.LOW)
+                return True, "GPIO BCM" + str(pin) + " = " + ("ON" if stan else "OFF")
+            except ImportError:
+                return False, "RPi.GPIO niedostepne — zainstaluj: pip install RPi.GPIO"
+            except Exception as e:
+                return False, "GPIO error: " + str(e)
+
+        # Node-RED — HTTP endpoint per kanal
+        if typ == "nodered":
+            # endpoint: GET http://IP:PORT/KANAL/on|off
+            # Stan: GET http://IP:PORT/KANAL/state -> {"state": true/false} lub {"value": 1/0}
+            action = "on" if stan else "off"
+            url = f"http://{dev['ip']}:{dev['port']}/{kanal}/{action}"
+            hdrs = {"Content-Type": "application/json"}
+            if dev["api_key"]: hdrs["Authorization"] = "Bearer " + dev["api_key"]
+            try:
+                req = urllib.request.Request(url, method="GET", headers=hdrs)
+                urllib.request.urlopen(req, timeout=5)
+                ok = True; msg = "Node-RED OK"
+            except Exception as e: ok = False; msg = str(e)
+            now = datetime.now().isoformat()
+            if ok:
+                db.execute("UPDATE urzadzenia_kanaly SET stan=? WHERE urzadzenie_id=? AND kanal=?", (1 if stan else 0, did, kanal))
+                db.execute("UPDATE urzadzenia SET ostatni_kontakt=?,status='online' WHERE id=?", (now, did))
+            db.commit(); db.close(); return ok, msg
+
+        # ESPHome
+        if typ == "esphome":
             path = f"/api/switch/{kanal}/{'turn_on' if stan else 'turn_off'}"; body = b""
+            hdrs = {"Content-Type": "application/json"}
+            if dev["api_key"]: hdrs["X-ESPHome-Password"] = dev["api_key"]
         else:
+            # esp32 / rpi slave
             path = "/api/relay"; body = json.dumps({"channel": kanal, "state": bool(stan)}).encode()
-        hdrs = {"Content-Type": "application/json"}
-        if dev["api_key"]: hdrs["X-API-Key" if dev["typ"] != "esphome" else "X-ESPHome-Password"] = dev["api_key"]
+            hdrs = {"Content-Type": "application/json"}
+            if dev["api_key"]: hdrs["X-API-Key"] = dev["api_key"]
         try:
             req = urllib.request.Request(f"http://{dev['ip']}:{dev['port']}{path}", data=body, method="POST", headers=hdrs)
             urllib.request.urlopen(req, timeout=5); ok = True; msg = "OK"
