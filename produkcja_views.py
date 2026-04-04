@@ -222,13 +222,20 @@ def register_produkcja(app):
         total_kwota = sum(r["kwota"] or 0 for r in sprzedaz)
 
         # Saldo karta
+        # Ile ma zapłacić przy następnej dostawie
+        cena_kl = float(k["cena_indyw"] if "cena_indyw" in k.keys() and k["cena_indyw"] else 0)
+        cena_def_k = float(gs("cena_jajka","1.20"))
+        cena_akt = cena_kl if cena_kl > 0 else cena_def_k
+        zam_sum = sum(float(z["ilosc"]) * cena_akt for z in zamow)
+        do_zaplaty = round(saldo + zam_sum, 2)  # dług + aktywne zamówienia
+
         if saldo > 0.01:
             saldo_kol = "#A32D2D"
-            saldo_txt = f"Do zapłaty: {round(saldo,2)} zł"
+            saldo_txt = "Do zapłaty: " + str(round(saldo,2)) + " zł"
             saldo_sub = "Klient ma dług — oczekuje na płatność"
         elif saldo < -0.01:
             saldo_kol = "#3B6D11"
-            saldo_txt = f"Nadpłata: {round(-saldo,2)} zł"
+            saldo_txt = "Nadpłata: " + str(round(-saldo,2)) + " zł"
             saldo_sub = "Klient nadpłacił — do zwrotu lub zaliczka"
         else:
             saldo_kol = "#534AB7"
@@ -298,7 +305,15 @@ def register_produkcja(app):
             f"<div style='font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px'>Saldo konta</div>"
             f"<div style='font-size:28px;font-weight:700;color:{saldo_kol};margin-top:4px'>{saldo_txt}</div>"
             f"<div style='font-size:12px;color:#888;margin-top:4px'>{saldo_sub}</div>"
-            f"<div style='margin-top:12px;display:flex;gap:8px;flex-wrap:wrap'>"
+            + (f"<div style='margin-top:8px;font-size:12px;background:#f5f5f0;border-radius:6px;padding:6px 10px'>"
+               f"💰 Cena indyw.: <b>{cena_akt} zł/szt</b>"
+               + (' <span style="color:#888">(domyślna)</span>' if cena_kl == 0 else ' <span style="color:#534AB7">(indyw.)</span>')
+               + f"</div>")
+            + (f"<div style='margin-top:8px;background:#fff3cd;border-radius:6px;padding:8px 12px;font-size:13px'>"
+               f"🧾 Przy następnej wizycie do zapłaty: <b style='font-size:16px'>{do_zaplaty} zł</b>"
+               f"<div style='font-size:11px;color:#888;margin-top:2px'>dług {round(saldo,2)} zł + zamówienia {round(zam_sum,2)} zł</div>"
+               f"</div>" if do_zaplaty > 0.01 else "")
+            + f"<div style='margin-top:12px;display:flex;gap:8px;flex-wrap:wrap'>"
             f"<a href='/klienci/{kid}/wplata' class='btn bg bsm'>+ Wpłata</a>"
             f"<a href='/klienci/{kid}/korekta-saldo' class='btn bo bsm'>Korekta salda</a>"
             f"</div></div>"
@@ -361,19 +376,56 @@ def register_produkcja(app):
             flash(f"Wpłata {kwota} zł zarejestrowana. Nowe saldo: {nowe_saldo} zł")
             return redirect(f"/klienci/{kid}")
 
+        # Ostatnie transakcje klienta
+        ostatnie = db.execute(
+            "SELECT * FROM konta_transakcje WHERE klient_id=? ORDER BY data DESC LIMIT 5", (kid,)).fetchall()
         db.close()
+        saldo_kol = "#A32D2D" if saldo > 0.01 else "#3B6D11" if saldo < -0.01 else "#888"
+        saldo_txt = ("Dług: " + str(round(saldo,2)) + " zł — klient powinien zapłacić" if saldo > 0.01
+                     else "Nadpłata: " + str(round(-saldo,2)) + " zł — masz mu oddać" if saldo < -0.01
+                     else "Rozliczony")
+        # Sugestia kwoty = aktualny dług
+        sug = str(round(saldo, 2)) if saldo > 0 else ""
+        trans_html = "".join(
+            "<div style='display:flex;justify-content:space-between;padding:4px 0;font-size:13px;"
+            "border-bottom:1px solid #f0ede4'>"
+            "<span style='color:#888'>" + t["data"][:16] + "</span>"
+            "<span>" + (t["opis"] or t["typ"]) + "</span>"
+            "<span style='font-weight:600;color:" + ("#3B6D11" if float(t["kwota"] or 0) < 0 else "#A32D2D") + "'>"
+            + ("+" if float(t["kwota"] or 0) < 0 else "") + str(round(float(t["kwota"] or 0),2)) + " zł</span>"
+            "<span style='color:#888'> → " + str(round(float(t["saldo_po"] or 0),2)) + " zł</span>"
+            "</div>" for t in ostatnie)
         html = (
-            f"<h1>Wpłata od: {k['nazwa']}</h1>"
-            f"<div class='card'><form method='POST'>"
-            f"<div class='al {'ald' if saldo > 0 else 'alok'}'>"
-            f"Aktualne saldo: <b>{'Dług: ' + str(round(saldo,2)) + ' zł' if saldo > 0 else 'Nadpłata: ' + str(round(-saldo,2)) + ' zł' if saldo < 0 else 'Rozliczony'}</b></div>"
-            "<label style='margin-top:12px'>Kwota wpłaty (zł)</label>"
-            "<input name='kwota' type='number' step='0.01' min='0.01' required style='font-size:24px;text-align:center' placeholder='0.00'>"
+            "<h1>Wpłata od: " + k["nazwa"] + "</h1>"
+            "<div class='card' style='margin-bottom:12px'><form method='POST'>"
+            "<div class='al " + ("ald" if saldo > 0.01 else "alok") + "' style='font-size:15px'>"
+            "<b>" + saldo_txt + "</b></div>"
+            "<label style='margin-top:14px'>Kwota wpłaty (zł)</label>"
+            "<input name='kwota' type='number' step='0.01' min='0.01' required"
+            " style='font-size:28px;text-align:center' value='" + sug + "' placeholder='0.00'>"
+            "<div id='podsum' style='background:#f5f5f0;border-radius:8px;padding:8px 12px;"
+            "font-size:13px;margin:8px 0'>"
+            "Po wpłacie: <b id='nowe-saldo'>oblicz...</b></div>"
             "<label>Opis</label>"
-            "<input name='opis' value='Wpłata gotówkowa' placeholder='np. Wpłata za jaja, Przelew'>"
-            "<br><button class='btn bg' style='margin-top:12px;width:100%;padding:12px'>Zarejestruj wpłatę</button>"
-            f"<a href='/klienci/{kid}' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
-            "</form></div>"
+            "<input name='opis' value='Wpłata gotówkowa' placeholder='np. Gotówka, Przelew BLIK'>"
+            "<button class='btn bg' style='margin-top:12px;width:100%;padding:14px;font-size:16px'>"
+            "Zarejestruj wpłatę</button>"
+            "<a href='/klienci/" + str(kid) + "' class='btn bo' style='display:block;text-align:center;margin-top:8px'>Anuluj</a>"
+            "</form>"
+            "<script>"
+            "var sal=" + str(saldo) + ";"
+            "var inp=document.querySelector('[name=kwota]');"
+            "function upd(){"
+            "  var k=parseFloat(inp.value)||0;"
+            "  var ns=Math.round((sal-k)*100)/100;"
+            "  var txt=ns>0.01?'Dług: '+ns+' zł':ns<-0.01?'Nadpłata: '+(-ns)+' zł':'Rozliczony ✓';"
+            "  document.getElementById('nowe-saldo').textContent=txt;"
+            "  document.getElementById('nowe-saldo').style.color=ns>0.01?'#A32D2D':'#3B6D11';"
+            "}"
+            "inp.addEventListener('input',upd);upd();"
+            "</script></div>"
+            + ("<div class='card'><b>Ostatnie transakcje</b><div style='margin-top:8px'>"
+               + trans_html + "</div></div>" if ostatnie else "")
         )
         return R(html, "zam")
 
@@ -456,27 +508,54 @@ def register_produkcja(app):
     def klienci_edytuj(kid):
         g = gid(); db = get_db()
         if request.method == "POST":
-            db.execute(
-                "UPDATE klienci SET nazwa=?,telefon=?,email=?,adres=?,uwagi=? WHERE id=? AND gospodarstwo_id=?",
-                (request.form["nazwa"], request.form.get("telefon", ""), request.form.get("email", ""),
-                 request.form.get("adres", ""), request.form.get("uwagi", ""), kid, g))
+            cena_i = float(request.form.get("cena_indyw", 0) or 0)
+            stal_z = 1 if request.form.get("stale_zamowienie") else 0
+            try:
+                db.execute(
+                    "UPDATE klienci SET nazwa=?,telefon=?,email=?,adres=?,uwagi=?,cena_indyw=?,stale_zamowienie=? WHERE id=? AND gospodarstwo_id=?",
+                    (request.form["nazwa"], request.form.get("telefon",""), request.form.get("email",""),
+                     request.form.get("adres",""), request.form.get("uwagi",""), cena_i, stal_z, kid, g))
+            except Exception:
+                db.execute(
+                    "UPDATE klienci SET nazwa=?,telefon=?,email=?,adres=?,uwagi=? WHERE id=? AND gospodarstwo_id=?",
+                    (request.form["nazwa"], request.form.get("telefon",""), request.form.get("email",""),
+                     request.form.get("adres",""), request.form.get("uwagi",""), kid, g))
             db.commit(); db.close()
             flash("Klient zaktualizowany.")
             return redirect(f"/klienci/{kid}")
         r = db.execute("SELECT * FROM klienci WHERE id=? AND gospodarstwo_id=?", (kid, g)).fetchone()
+        cena_def = gs("cena_jajka","1.20")
         db.close()
         if not r: return redirect("/klienci")
+        cena_i = float(r["cena_indyw"] if "cena_indyw" in r.keys() else 0) or 0
+        stal_z = int(r["stale_zamowienie"] if "stale_zamowienie" in r.keys() else 0) or 0
         html = (
-            f"<h1>Edytuj: {r['nazwa']}</h1><div class='card'><form method='POST'>"
-            f"<label>Nazwa</label><input name='nazwa' required value='{r['nazwa']}'>"
+            "<h1>Edytuj: " + r["nazwa"] + "</h1>"
+            "<div class='card'><form method='POST'>"
+            "<label>Nazwa</label>"
+            "<input name='nazwa' required value='" + r["nazwa"] + "'>"
             "<div class='g2'>"
-            f"<div><label>Telefon</label><input name='telefon' value='{r['telefon'] or ''}'></div>"
-            f"<div><label>Email</label><input name='email' value='{r['email'] or ''}'></div>"
+            "<div><label>Telefon</label><input name='telefon' value='" + (r["telefon"] or "") + "'></div>"
+            "<div><label>Email</label><input name='email' value='" + (r["email"] or "") + "'></div>"
             "</div>"
-            f"<label>Adres</label><textarea name='adres' rows='2'>{r['adres'] or ''}</textarea>"
-            f"<label>Uwagi</label><input name='uwagi' value='{r['uwagi'] or ''}'>"
+            "<label>Adres</label><textarea name='adres' rows='2'>" + (r["adres"] or "") + "</textarea>"
+            "<div class='g2' style='margin-top:8px'>"
+            "<div>"
+            "<label>💰 Indywidualna cena jajka (zł/szt.)</label>"
+            "<input name='cena_indyw' type='number' step='0.01' min='0' value='" + str(cena_i or "") + "' placeholder='domyslna: " + str(cena_def) + " zl'>"
+            "<p style='font-size:11px;color:#888;margin-top:3px'>0 = używa ceny domyślnej z ustawień</p>"
+            "</div>"
+            "<div>"
+            "<label>Stałe zamówienie (tygodniowe)</label>"
+            "<label style='display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer'>"
+            "<input type='checkbox' name='stale_zamowienie'" + (" checked" if stal_z else "") + "> Klient ma stałe zamówienie"
+            "</label>"
+            "<p style='font-size:11px;color:#888;margin-top:3px'>Wyswietla sie przy sprzedazy</p>"
+            "</div>"
+            "</div>"
+            "<label>Uwagi</label><input name='uwagi' value='" + (r["uwagi"] or "") + "'>"
             "<br><button class='btn bp' style='margin-top:12px'>Zapisz</button>"
-            f"<a href='/klienci/{kid}' class='btn bo' style='margin-left:8px'>Anuluj</a>"
+            "<a href='/klienci/" + str(kid) + "' class='btn bo' style='margin-left:8px'>Anuluj</a>"
             "</form></div>"
         )
         return R(html, "zam")

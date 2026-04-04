@@ -162,6 +162,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
     <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
     <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla</a>
     <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
+    <a href="/magazyn-jaj" class="nl {{ 'on' if p=='mag_jaj' }}">&#x1F95A; Magazyn</a>
 
     <div class="ni">
       <button class="nl {{ 'on' if p in ['wyd','pasza','woda','stado'] }}">Zasoby <span class="ar">&#9660;</span></button>
@@ -267,6 +268,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F414; Hodowla</a>
 
   <a href="/sprzedaz" class="dr-fl {{ 'on' if p in ['zam','mag','sprzedaz'] }}" onclick="drClose()">&#x1F4E6; Sprzeda&#380;</a>
+  <a href="/magazyn-jaj" class="dr-fl {{ 'on' if p=='mag_jaj' }}" onclick="drClose()">&#x1F95A; Magazyn jaj</a>
 
   <div class="dr-sec" id="ds-zas">
     <div class="dr-hd" onclick="drSec('ds-zas')">
@@ -842,6 +844,7 @@ def dashboard():
         "</div></div>"
     )
 
+    _pokaz_ster = gs("pokaz_sterowanie","1") == "1"
     sterowanie_html = (
         "<div class='card' style='margin-bottom:12px'>"
         "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>"
@@ -915,7 +918,7 @@ def dashboard():
         '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,0)) + ' zł</div><div class="l">Przychód miesiąc</div><div class="s">wydatki: ' + str(round(wyd,0)) + ' zł</div></div>'
         '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
         '</div>'
-        + sterowanie_html
+        + (sterowanie_html if _pokaz_ster else "")
         + _kafelki_czynnosci(g)
         + '<div class="g2">'
 

@@ -101,7 +101,7 @@ def register_sprzedaz(app):
 
         # Klienci i zamówienia (do formularza)
         klienci = db.execute(
-            "SELECT id, nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+            "SELECT id, nazwa, cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
         zamow_akt = db.execute(
             "SELECT z.id, z.data_dostawy, z.ilosc, k.nazwa as kn"
             " FROM zamowienia z LEFT JOIN klienci k ON z.klient_id=k.id"
@@ -223,6 +223,12 @@ def register_sprzedaz(app):
             "c=parseFloat(document.getElementById('cena').value)||0;"
             "document.getElementById('wartosc').textContent=(s*c).toFixed(2)+' zl';}"
             "document.querySelector('[name=jaja_sprzedane]').addEventListener('input',oblicz);"
+            "var klSel=document.querySelector('[name=klient_id]');if(klSel){klSel.addEventListener('change',function(){"
+            "  var kid=this.value;if(!kid)return;"
+            "  fetch('/api/klient-cena/'+kid).then(function(r){return r.json();}).then(function(d){"
+            "    document.getElementById('cena').value=d.cena;oblicz();"
+            "  }).catch(function(){});"
+            "});};"
             "</script>"
             "</div>"
         )
@@ -429,11 +435,68 @@ def register_sprzedaz(app):
                "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p></div>")
         )
 
+        straty_mies = 0; za0_mies = 0; pot_strata = 0.0; straty_hist = []
+        try:
+            straty_mies = int(db.execute(
+                "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')",
+                (g,)).fetchone()["s"])
+            za0_mies = int(db.execute(
+                "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND cena_szt=0 AND strftime('%Y-%m',data)=strftime('%Y-%m','now')",
+                (g,)).fetchone()["s"])
+            cena_def_f = float(gs("cena_jajka","1.20"))
+            pot_strata = round((straty_mies + za0_mies) * cena_def_f, 2)
+            straty_hist = db.execute(
+                "SELECT * FROM jaja_straty WHERE gospodarstwo_id=? ORDER BY data DESC, id DESC LIMIT 10",
+                (g,)).fetchall()
+        except Exception:
+            pass
+        sh_rows2 = ""
+        for _r in straty_hist:
+            sh_rows2 += (
+                "<tr><td style='font-size:12px'>" + _r["data"] + "</td>"
+                "<td style='color:#A32D2D;font-weight:700;text-align:center'>-" + str(_r["ilosc"]) + "</td>"
+                "<td>" + {"stluczone":"Stluczki","zepsute":"Zepsute"}.get(_r["powod"],"Inne") + "</td>"
+                "<td style='font-size:11px;color:#888'>" + (_r["uwagi"] or "") + "</td>"
+                "<td style='color:#A32D2D'>" + str(round(_r["ilosc"]*cena_def_f,2)) + " zl</td>"
+                "</tr>"
+            )
+        _dzis2 = date.today().isoformat()
+        s_straty = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Straty i gratis</b>"
+            "<a href='/magazyn-jaj' class='btn bo bsm' style='font-size:11px'>Pelny magazyn</a>"
+            "</div>"
+            "<div style='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px'>"
+            "<span style='font-size:13px'>Straty mies.: <b style='color:#A32D2D'>" + str(straty_mies) + " szt.</b></span>"
+            "<span style='font-size:13px'>Za darmo: <b style='color:#888'>" + str(za0_mies) + " szt.</b></span>"
+            "<span style='font-size:13px'>Pot. strata: <b style='color:#A32D2D'>" + str(pot_strata) + " zl</b></span>"
+            "</div>"
+            "<form method='POST' action='/magazyn-jaj' style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+            "<input type='hidden' name='action' value='strata'>"
+            "<div><label style='font-size:11px'>Ilosc strat (szt.)</label>"
+            "<input name='strata_ile' type='number' min='1' placeholder='np. 3' style='width:80px;font-size:14px;text-align:center'></div>"
+            "<div><label style='font-size:11px'>Powod</label>"
+            "<select name='strata_powod' style='font-size:13px'>"
+            "<option value='stluczone'>Stluczki</option>"
+            "<option value='zepsute'>Zepsute</option>"
+            "<option value='zgubione'>Inne</option>"
+            "</select></div>"
+            "<input name='strata_data' type='date' value='" + _dzis2 + "' style='font-size:13px'>"
+            "<button class='btn br bsm'>Zapisz strate</button>"
+            "</form>"
+            + ("<div style='overflow-x:auto;margin-top:8px'>"
+               "<table style='font-size:12px'><thead><tr>"
+               "<th>Data</th><th>Szt.</th><th>Powod</th><th>Uwagi</th><th>Pot.strata</th></tr></thead>"
+               "<tbody>" + sh_rows2 + "</tbody></table></div>" if straty_hist else "")
+            + "</div>"
+        )
         html = (
-            "<h1>Sprzedaż</h1>"
+            "<h1>Sprzedaz</h1>"
             + s_formularz
             + s_magazyn
             + s_zamowienia
+            + s_straty
             + s_filtr
             + s_historia
             + s_klienci
@@ -452,7 +515,7 @@ def register_sprzedaz(app):
         if not r: db.close(); flash("Nie znaleziono."); return redirect("/sprzedaz")
 
         klienci = db.execute(
-            "SELECT id, nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+            "SELECT id, nazwa, cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
         zamow = db.execute(
             "SELECT z.id, z.data_dostawy, z.ilosc, k.nazwa as kn FROM zamowienia z"
             " LEFT JOIN klienci k ON z.klient_id=k.id"
@@ -541,5 +604,16 @@ def register_sprzedaz(app):
         db.close()
         flash("Transakcja usunieta.")
         return redirect("/sprzedaz")
+
+    @app.route("/api/klient-cena/<int:kid>")
+    @farm_required
+    def api_klient_cena(kid):
+        from flask import jsonify
+        g = gid(); db = get_db()
+        k = db.execute("SELECT cena_indyw FROM klienci WHERE id=? AND gospodarstwo_id=?", (kid,g)).fetchone()
+        db.close()
+        cena_i = float((k["cena_indyw"] or 0) if k else 0)
+        cena_def = float(gs("cena_jajka","1.20"))
+        return jsonify({"cena": cena_i if cena_i > 0 else cena_def, "indyw": cena_i > 0})
 
     return app

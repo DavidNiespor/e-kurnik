@@ -1738,6 +1738,12 @@ def register_routes(app):
         return R(html,"ana")
 
     @app.route("/magazyn", methods=["GET","POST"])
+    @app.route("/magazyn")
+    @farm_required
+    def magazyn_redirect():
+        return redirect("/magazyn-jaj")
+
+    @app.route("/magazyn-jaj", methods=["GET","POST"])
     @farm_required
     def magazyn():
         g=gid(); db=get_db()
@@ -1971,7 +1977,7 @@ def register_routes(app):
             "<th>Uwagi</th></tr></thead>"
             "<tbody>" + (w_hist or "<tr><td colspan=5 style='color:#888;padding:10px'>Brak</td></tr>") + "</tbody></table></div></div>"
         )
-        return R(html, "mag")
+        return R(html, "mag_jaj")
 
     # ─── USTAWIENIA + KIOSK + IMPORT + ADMIN ─────────────────────────────────
     @app.route("/ustawienia", methods=["GET","POST"])
@@ -2282,6 +2288,8 @@ def register_routes(app):
                 for k in ["pasza_dzienna_kg","cena_jajka","etykieta_producent","etykieta_adres","lat","lon"]:
                     v = request.form.get(k)
                     if v is not None: save_setting(k, v.strip(), g)
+                # Toggle sterowania na dashboardzie
+                save_setting("pokaz_sterowanie", "1" if request.form.get("pokaz_sterowanie") else "0", g)
                 flash("Ustawienia podstawowe zapisane.")
             elif sekcja == "media":
                 for k in ["cena_wody_litra","cena_kwh"]:
@@ -2331,6 +2339,14 @@ def register_routes(app):
             '<div><label>Adres (etykieta)</label>'
             '<input name="etykieta_adres" value="' + _v("etykieta_adres","") + '"></div>'
             '</div>'
+            '<div style="margin-top:10px;padding:10px;background:#f5f5f0;border-radius:8px">'
+            '<label style="display:flex;align-items:center;gap:10px;cursor:pointer">'
+            '<input type="checkbox" name="pokaz_sterowanie"'
+            + (' checked' if _v('pokaz_sterowanie','1')=='1' else '') +
+            ' style="width:18px;height:18px">'
+            '<div><b>Pokazuj sterowanie na dashboardzie</b>'
+            '<br><span style="font-size:12px;color:#888">Odznacz jeśli nie używasz GPIO/Supla</span>'
+            '</div></label></div>'
             '<button class="btn bp bsm" style="margin-top:10px">Zapisz</button>'
             '</form></div>'
         )
