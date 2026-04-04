@@ -15,63 +15,264 @@ def register_produkcja(app):
 
     # ─── PRODUKCJA — tylko zbiory jaj ─────────────────────────────────────
 
-    @app.route("/produkcja")
+    @app.route("/produkcja", methods=["GET","POST"])
+    @app.route("/produkcja/dodaj", methods=["POST"])
     @farm_required
     def produkcja():
         g = gid(); db = get_db()
-        rows = db.execute(
-            "SELECT * FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 90", (g,)).fetchall()
-        kur = db.execute(
-            "SELECT COALESCE(SUM(liczba),0) as s FROM stado "
-            "WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 1
-        # Statystyki miesiąc
+
+        # ── POST: zapis zebranych jaj ──────────────────────────────────────
+        if request.method == "POST":
+            d     = request.form.get("data", date.today().isoformat())
+            jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
+            uwagi = request.form.get("uwagi", "")
+            ex = db.execute(
+                "SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, d)).fetchone()
+            if ex:
+                db.execute(
+                    "UPDATE produkcja SET jaja_zebrane=?,uwagi=? WHERE id=?",
+                    (jaja, uwagi, ex["id"]))
+            else:
+                db.execute(
+                    "INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg,uwagi)"
+                    " VALUES(?,?,?,0,0,?)",
+                    (g, d, jaja, uwagi))
+            db.commit(); db.close()
+            flash("Zapisano: " + str(jaja) + " szt. — " + d)
+            return redirect("/produkcja")
+
+        # ── GET ────────────────────────────────────────────────────────────
+        kur = int(db.execute(
+            "SELECT COALESCE(SUM(liczba),0) as s FROM stado"
+            " WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'",
+            (g,)).fetchone()["s"]) or 1
+
+        # Statystyki
         stat = db.execute(
-            "SELECT COALESCE(SUM(jaja_zebrane),0) as sum_zeb, "
-            "COALESCE(AVG(jaja_zebrane),0) as avg_zeb, COUNT(*) as dni "
-            "FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as sum_zeb,"
+            " COALESCE(AVG(jaja_zebrane),0) as avg_zeb"
+            " FROM produkcja WHERE gospodarstwo_id=?"
+            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
+
         # Stan magazynu
-        mag = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-        straty_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?", (g,)).fetchone()["s"] if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else 0)
+        mag = db.execute(
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as p,"
+            " COALESCE(SUM(jaja_sprzedane),0) as s"
+            " FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
+        straty_tot = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty"
+            " WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
+        za0_tot = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol"
+            " WHERE gospodarstwo_id=? AND cena_szt=0", (g,)).fetchone()["s"])
         stan_mag = max(0, int(mag["p"]) - int(mag["s"]) - straty_tot)
-        rez = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"])
-        straty_mies = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')" if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else "SELECT 0 as s", (g,) if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else ()).fetchone()["s"])
-        cena_def = float(gs("cena_jajka","1.20"))
+        rez = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia"
+            " WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')",
+            (g,)).fetchone()["s"])
+        dostepne = max(0, stan_mag - rez)
+
+        # Straty miesiąc
+        straty_mies = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty"
+            " WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')",
+            (g,)).fetchone()["s"])
+        za0_mies = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol"
+            " WHERE gospodarstwo_id=? AND cena_szt=0"
+            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')",
+            (g,)).fetchone()["s"])
+        cena_def = float(gs("cena_jajka", "1.20"))
+        pot_strata = round((straty_mies + za0_mies) * cena_def, 2)
+
+        # Historia 60 dni
+        rows = db.execute(
+            "SELECT * FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 60",
+            (g,)).fetchall()
+
+        # Ostatnie straty
+        straty_hist = db.execute(
+            "SELECT * FROM jaja_straty WHERE gospodarstwo_id=?"
+            " ORDER BY data DESC, id DESC LIMIT 15", (g,)).fetchall()
+
+        # Dzisiejszy wpis
+        dzis_row = db.execute(
+            "SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=?",
+            (g, date.today().isoformat())).fetchone()
+
+        # Ostatnie 7 wpisów (mini historia)
+        ostatnie = db.execute(
+            "SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=?"
+            " ORDER BY data DESC LIMIT 7", (g,)).fetchall()
+
         db.close()
 
+        # ── HTML ───────────────────────────────────────────────────────────
+        dzis = date.today().isoformat()
+
+        # 4 kafelki główne
+        s_stats = (
+            "<div class='g4' style='margin-bottom:12px'>"
+            "<div class='card stat'>"
+            "<div class='v' style='color:#3B6D11'>" + str(stan_mag) + "</div>"
+            "<div class='l'>W magazynie</div>"
+            "<div class='s'>dostepne: " + str(dostepne) + " szt.</div>"
+            "</div>"
+            "<div class='card stat'>"
+            "<div class='v'>" + str(int(stat["sum_zeb"])) + "</div>"
+            "<div class='l'>Zebrano w mies.</div>"
+            "<div class='s'>sr. " + str(round(stat["avg_zeb"],1)) + " / dzien</div>"
+            "</div>"
+            "<div class='card stat'>"
+            "<div class='v' style='color:#A32D2D'>" + str(straty_mies) + "</div>"
+            "<div class='l'>Straty mies.</div>"
+            "<div class='s'>" + str(straty_mies + za0_mies) + " szt. razem z gratis</div>"
+            "</div>"
+            "<div class='card stat'>"
+            "<div class='v' style='color:#A32D2D'>" + str(pot_strata) + " zl</div>"
+            "<div class='l'>Pot. strata mies.</div>"
+            "<div class='s'>straty + gratis x cena</div>"
+            "</div>"
+            "</div>"
+        )
+
+        # Formularz wpisu dziennego
+        mini_hist = "".join(
+            "<div style='background:#f5f5f0;border-radius:6px;padding:3px 8px;"
+            "font-size:11px;white-space:nowrap'>"
+            "<span style='color:#888'>" + r["data"][5:] + "</span> "
+            "<b>" + str(r["jaja_zebrane"]) + "</b></div>"
+            for r in ostatnie)
+
+        s_wpis = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Zebrane jaja</b>"
+            + ("<span style='font-size:12px;color:#3B6D11;font-weight:600'>Dzis: "
+               + str(dzis_row["jaja_zebrane"]) + " szt.</span>" if dzis_row else
+               "<span style='font-size:12px;color:#aaa'>Brak wpisu na dzis</span>")
+            + "</div>"
+            "<div style='display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px'>"
+            + mini_hist +
+            "</div>"
+            "<form method='POST'>"
+            "<div style='display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap'>"
+            "<div style='flex:1;min-width:80px'><label style='font-size:11px'>Szt. zebranych</label>"
+            "<input name='jaja_zebrane' type='number' min='0'"
+            " value='" + (str(dzis_row["jaja_zebrane"]) if dzis_row else "") + "'"
+            " placeholder='0' style='font-size:20px;text-align:center' required></div>"
+            "<div><label style='font-size:11px'>Data</label>"
+            "<input name='data' type='date' value='" + dzis + "' style='font-size:13px'></div>"
+            "<div style='flex:2;min-width:120px'><label style='font-size:11px'>Uwagi</label>"
+            "<input name='uwagi' value='" + (dzis_row["uwagi"] or "" if dzis_row else "") + "'"
+            " placeholder='opcjonalnie' style='font-size:13px'></div>"
+            "<button class='btn bg bsm' style='padding:10px 16px'>Zapisz</button>"
+            "</div>"
+            "</form></div>"
+        )
+
+        # Formularz strat
+        s_strata = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<b>Dodaj strate / za darmo</b>"
+            "<div style='display:flex;gap:12px;margin-top:10px;flex-wrap:wrap'>"
+
+            "<form method='POST' action='/magazyn-jaj'"
+            " style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;flex:1'>"
+            "<input type='hidden' name='action' value='strata'>"
+            "<div><label style='font-size:11px'>Stluczki/zepsute (szt.)</label>"
+            "<input name='strata_ile' type='number' min='1'"
+            " style='width:80px;font-size:16px;text-align:center' placeholder='0'></div>"
+            "<div><label style='font-size:11px'>Powod</label>"
+            "<select name='strata_powod' style='font-size:13px'>"
+            "<option value='stluczone'>Stluczki</option>"
+            "<option value='zepsute'>Zepsute</option>"
+            "<option value='zgubione'>Inne</option>"
+            "</select></div>"
+            "<input name='strata_data' type='date' value='" + dzis + "' style='font-size:13px'>"
+            "<button class='btn br bsm'>Zapisz strate</button>"
+            "</form>"
+
+            "<form method='POST' action='/magazyn-jaj'"
+            " style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;flex:1'>"
+            "<input type='hidden' name='action' value='za0'>"
+            "<div><label style='font-size:11px'>Oddane za darmo (szt.)</label>"
+            "<input name='za0_ile' type='number' min='1'"
+            " style='width:80px;font-size:16px;text-align:center' placeholder='0'></div>"
+            "<div><label style='font-size:11px'>Opis</label>"
+            "<input name='za0_uwagi' placeholder='Sasiad, probka...' style='font-size:13px'></div>"
+            "<input name='za0_data' type='date' value='" + dzis + "' style='font-size:13px'>"
+            "<button class='btn bo bsm'>Za darmo</button>"
+            "</form>"
+
+            "</div></div>"
+        )
+
+        # Historia strat
+        POWOD = {"stluczone": "Stluczki", "zepsute": "Zepsute", "zgubione": "Inne", "inne": "Inne"}
+        sh_rows = ""
+        for r in straty_hist:
+            sh_rows += (
+                "<tr>"
+                "<td style='font-size:12px'>" + r["data"] + "</td>"
+                "<td style='color:#A32D2D;font-weight:700;text-align:center'>-" + str(r["ilosc"]) + "</td>"
+                "<td>" + POWOD.get(r["powod"], r["powod"]) + "</td>"
+                "<td style='font-size:11px;color:#888'>" + (r["uwagi"] or "") + "</td>"
+                "<td style='color:#A32D2D;font-size:12px'>" + str(round(r["ilosc"]*cena_def,2)) + " zl</td>"
+                "<td><a href='/jaja_strata/" + str(r["id"]) + "/usun' class='btn br bsm'"
+                " onclick='return confirm(\"Usunac?\")'>x</a></td>"
+                "</tr>"
+            )
+
+        s_straty_hist = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<b>Historia strat</b>"
+            "<div style='overflow-x:auto'>"
+            "<table style='font-size:13px;margin-top:8px'><thead><tr>"
+            "<th>Data</th><th>Szt.</th><th>Powod</th><th>Uwagi</th><th>Pot.strata</th><th></th>"
+            "</tr></thead>"
+            "<tbody>"
+            + (sh_rows or "<tr><td colspan=6 style='color:#888;text-align:center;padding:12px'>Brak strat</td></tr>")
+            + "</tbody></table></div></div>"
+        ) if straty_hist else ""
+
+        # Historia zebranych
         rows_html = ""
         for r in rows:
             niesn = round(r["jaja_zebrane"] / kur * 100, 1) if kur else 0
             kol = "#3B6D11" if niesn >= 80 else "#BA7517" if niesn >= 60 else "#A32D2D"
             rows_html += (
-                f"<tr>"
-                f"<td style='white-space:nowrap;font-size:13px'>{r['data']}</td>"
-                f"<td style='font-weight:700;font-size:18px;text-align:center'>{r['jaja_zebrane']}</td>"
-                f"<td style='color:{kol};font-weight:600;text-align:center'>{niesn}%</td>"
-                f"<td style='color:#888;font-size:12px'>{r['uwagi'] or ''}</td>"
-                f"<td><a href='/produkcja/edytuj/{r['data']}' class='btn bo bsm'>Edytuj</a></td>"
-                f"</tr>"
+                "<tr>"
+                "<td style='white-space:nowrap;font-size:13px'>" + r["data"] + "</td>"
+                "<td style='font-weight:700;font-size:16px;text-align:center'>" + str(r["jaja_zebrane"]) + "</td>"
+                "<td style='color:" + kol + ";font-weight:600;text-align:center'>" + str(niesn) + "%</td>"
+                "<td style='color:#888;font-size:12px'>" + (r["uwagi"] or "") + "</td>"
+                "<td><a href='/produkcja/edytuj/" + r["data"] + "' class='btn bo bsm' style='font-size:11px'>Edytuj</a></td>"
+                "</tr>"
             )
 
-        html = (
-            "<h1>Produkcja jaj</h1>"
-            "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
-            "<a href='/sprzedaz' class='btn bo bsm'>Sprzedaz →</a>"
-            "</div>"
-            + f"<div class='g4' style='margin-bottom:12px'>"
-            f"<div class='card stat'><div class='v'>{int(stat['sum_zeb'])}</div><div class='l'>Zebrano w mies.</div></div>"
-            f"<div class='card stat'><div class='v'>{round(stat['avg_zeb'],1)}</div><div class='l'>Srednio / dzien</div></div>"
-            f"<div class='card stat'><div class='v' style='color:#3B6D11'>{stan_mag}</div><div class='l'>W magazynie</div><div class='s'>rez. {rez} szt.</div></div>"
-            f"<div class='card stat'><div class='v' style='color:#A32D2D'>{straty_mies}</div><div class='l'>Straty mies.</div><div class='s'>{round(straty_mies*cena_def,2)} zl</div></div>"
-            "</div>"
-            + "<div class='card' style='overflow-x:auto'>"
-            "<table><thead><tr>"
+        s_historia = (
+            "<div class='card'><b>Historia zebran — 60 dni</b>"
+            "<div style='overflow-x:auto'>"
+            "<table style='font-size:13px;margin-top:8px'><thead><tr>"
             "<th>Data</th><th style='text-align:center'>Zebrane</th>"
             "<th style='text-align:center'>Niesnosc</th><th>Uwagi</th><th></th>"
             "</tr></thead>"
-            f"<tbody>{rows_html or '<tr><td colspan=5 style=\"color:#888;text-align:center;padding:20px\">Brak wpisow</td></tr>'}</tbody>"
-            "</table></div>"
+            "<tbody>"
+            + (rows_html or "<tr><td colspan=5 style='color:#888;text-align:center;padding:20px'>Brak wpisow</td></tr>")
+            + "</tbody></table></div></div>"
+        )
+
+        html = (
+            "<h1>Magazyn jaj</h1>"
+            + s_stats
+            + s_wpis
+            + s_strata
+            + s_straty_hist
+            + s_historia
         )
         return R(html, "prod")
+
 
     @app.route("/produkcja/edytuj/<data>", methods=["GET", "POST"])
     @farm_required
@@ -567,5 +768,14 @@ def register_produkcja(app):
             "</form></div>"
         )
         return R(html, "zam")
+
+    @app.route("/jaja_strata/<int:sid>/usun")
+    @farm_required
+    def jaja_strata_usun(sid):
+        g = gid(); db = get_db()
+        db.execute("DELETE FROM jaja_straty WHERE id=? AND gospodarstwo_id=?", (sid, g))
+        db.commit(); db.close()
+        flash("Strata usunieta.")
+        return redirect("/produkcja")
 
     return app

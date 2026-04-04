@@ -160,7 +160,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   <span class="nb-farm" title="{{ farm_name }}">{{ farm_name }}</span>
   <div class="nb-links">
     <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
-    <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla</a>
+    <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Magazyn</a>
     <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
 
     <div class="ni">
@@ -264,7 +264,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 <div class="dr" id="dr">
   <a href="/" class="dr-fl {{ 'on' if p=='dash' }}" onclick="drClose()">&#x1F3E0; Dashboard</a>
 
-  <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F414; Hodowla</a>
+  <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F95A; Magazyn</a>
 
   <a href="/sprzedaz" class="dr-fl {{ 'on' if p in ['zam','mag','sprzedaz'] }}" onclick="drClose()">&#x1F4E6; Sprzeda&#380;</a>
 
