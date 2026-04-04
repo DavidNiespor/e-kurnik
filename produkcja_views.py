@@ -622,10 +622,17 @@ def register_produkcja(app):
         if request.method == "POST":
             kwota = float(request.form.get("kwota", 0) or 0)
             opis  = request.form.get("opis", "Wpłata").strip() or "Wpłata"
-            if kwota <= 0:
+            rozlicz0 = request.form.get("rozlicz_do_zera") == "1"
+            if kwota <= 0 and not rozlicz0:
                 flash("Kwota musi być > 0"); db.close(); return redirect(f"/klienci/{kid}/wplata")
             from datetime import datetime
-            nowe_saldo = round(saldo - kwota, 2)  # wpłata zmniejsza dług
+            if rozlicz0:
+                # Zeruj saldo - wplata = aktualne saldo
+                if kwota <= 0: kwota = max(0, saldo)
+                nowe_saldo = 0.0
+                opis = opis + " (rozliczono do zera)"
+            else:
+                nowe_saldo = round(saldo - kwota, 2)
             if ks:
                 db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=? WHERE klient_id=?",
                            (nowe_saldo, datetime.now().isoformat(), kid))
@@ -637,8 +644,12 @@ def register_produkcja(app):
                 "VALUES(?,?,?,?,?,?,?)",
                 (g, kid, datetime.now().isoformat(), "wplata", -kwota, opis, nowe_saldo))
             db.commit(); db.close()
-            flash(f"Wpłata {kwota} zł zarejestrowana. Nowe saldo: {nowe_saldo} zł")
-            return redirect(f"/klienci/{kid}")
+            flash_msg = f"Wpłata {kwota} zł. Nowe saldo: {nowe_saldo} zł"
+            if rozlicz0: flash_msg = f"Rozliczono do zera. Saldo: 0.00 zł ✓"
+            flash(flash_msg)
+            # Wróć na sprzedaz jeśli przyszło stamtąd
+            ref = request.referrer or ""
+            return redirect("/sprzedaz" if "/sprzedaz" in ref else f"/klienci/{kid}")
 
         # Ostatnie transakcje klienta
         ostatnie = db.execute(

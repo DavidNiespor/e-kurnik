@@ -532,9 +532,9 @@ def register_sprzedaz(app):
                 + ("  · ostatnia: " + k["ostatnia"] if k["ostatnia"] else "")
                 + "</div></div>"
                 "<div style='display:flex;gap:6px;flex-wrap:wrap'>"
-                "<a href='/klienci/" + str(kid_id) + "/wplata' class='btn bg bsm'>+ Wpłata</a>"
-                "<a href='/klienci/" + str(kid_id) + "/korekta-saldo' class='btn bo bsm'>Korekta</a>"
+                "<button class='btn bg bsm' onclick='toggleWpl(" + str(kid_id) + ")'>+ Wpłata</button>"
                 "<a href='/klienci/" + str(kid_id) + "/edytuj' class='btn bo bsm'>Edytuj</a>"
+                "<a href='/klienci/" + str(kid_id) + "' class='btn bo bsm'>Szczegóły</a>"
                 "</div></div>"
                 + (
                     "<div style='margin-top:8px;padding-top:8px;border-top:1px solid #f0ede4'>"
@@ -542,6 +542,26 @@ def register_sprzedaz(app):
                     if ost_html else
                     "<div style='font-size:11px;color:#ccc;margin-top:6px'>Brak transakcji w tym zakresie</div>"
                 )
+                + "<div id='wpl-" + str(kid_id) + "' style='display:none;margin-top:10px;"
+                "padding:10px;background:#f0f9f0;border-radius:8px;border:1px solid #c8e6c9'>"
+                "<form method='POST' action='/klienci/" + str(kid_id) + "/wplata'"
+                " style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+                "<div><label style='font-size:11px'>Kwota wpłaty (zł)</label>"
+                "<input name='kwota' type='number' step='0.01' min='0.01' required"
+                " value='" + (str(round(saldo,2)) if saldo > 0.01 else "") + "'"
+                " style='font-size:18px;text-align:center;width:120px'></div>"
+                "<div style='flex:2;min-width:120px'><label style='font-size:11px'>Opis</label>"
+                "<input name='opis' value='Wplata gotowkowa' style='font-size:13px'></div>"
+                "<input type='hidden' name='rozlicz_do_zera' id='rz0-" + str(kid_id) + "' value=''>"
+                "<div style='display:flex;flex-direction:column;gap:4px'>"
+                "<button class='btn bg bsm'>Zapisz wpłatę</button>"
+                "<button type='button' class='btn bo bsm' style='font-size:11px'"
+                " onclick='document.getElementById(\"rz0-" + str(kid_id) + "\").value=\"1\";"
+                "this.closest(\"form\").submit()'>Rozlicz do 0</button>"
+                "</div></form>"
+                "<button class='btn bo bsm' style='font-size:11px;margin-top:4px'"
+                " onclick='document.getElementById(\"wpl-" + str(kid_id) + "\").style.display=\"none\"'>✕ Anuluj</button>"
+                "</div>"
                 + "</div>"
             )
 
@@ -569,6 +589,10 @@ def register_sprzedaz(app):
             + (kl_html or
                "<div class='card'><p style='color:#888;text-align:center;padding:20px'>"
                "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p></div>")
+            + "<script>function toggleWpl(id){"
+            "var e=document.getElementById('wpl-'+id);"
+            "e.style.display=e.style.display==='none'?'block':'none';"
+            "}</script>"
         )
 
         straty_mies = 0; za0_mies = 0; pot_strata = 0.0; straty_hist = []
@@ -630,12 +654,12 @@ def register_sprzedaz(app):
         html = (
             "<h1>Sprzedaz</h1>"
             + s_formularz
+            + s_klienci
             + s_magazyn
             + s_zamowienia
             + s_straty
             + s_filtr
             + s_historia
-            + s_klienci
         )
         return R(html, "zam")
 
