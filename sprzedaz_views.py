@@ -73,8 +73,48 @@ def register_sprzedaz(app):
                     (g, kid, "sprzedaz", kwota,
                      str(sprzed) + " szt. x " + str(cena) + " zl", nowe))
 
+            # Rabat — obniż wartość transakcji
+            rabat = float(request.form.get("rabat", 0) or 0)
+            if rabat > 0:
+                kwota = max(0, round(kwota - rabat, 2))
+                db.execute("UPDATE sprzedaz_szczegol SET wartosc=? WHERE id=(SELECT MAX(id) FROM sprzedaz_szczegol WHERE gospodarstwo_id=?)", (kwota, g))
+
+            # Wpłata klienta — zaktualizuj saldo
+            wplata = float(request.form.get("wplata_klienta", 0) or 0)
+            rozlicz0 = request.form.get("rozlicz_do_zera") == "1"
+            if kid and (wplata > 0 or rozlicz0):
+                from datetime import datetime
+                ks2 = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+                stare_sal = float(ks2["saldo_pln"] if ks2 else 0)
+                do_zaplaty = round(stare_sal + kwota, 2)
+                if rozlicz0:
+                    # Zeruj saldo niezaleznie od reszty/nadplaty
+                    nowe_sal = 0.0
+                    if wplata <= 0: wplata = max(0, do_zaplaty)
+                    reszta = round(wplata - do_zaplaty, 2)
+                else:
+                    nowe_sal = round(do_zaplaty - wplata, 2)
+                    reszta = round(wplata - do_zaplaty, 2)
+                if ks2:
+                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
+                else:
+                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe_sal))
+                opis = ("Rozliczono do zera" if rozlicz0 else "Wplata") + " przy sprzedazy " + str(sprzed) + " szt."
+                db.execute("INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)"
+                    , (g, kid, "wplata", -wplata, opis, nowe_sal))
+                flash_msg = ("Zapisano: " + str(sprzed) + " szt. = " + str(kwota) + " zl"
+                    + (", rabat: " + str(rabat) + " zl" if rabat > 0 else "")
+                    + (", wplata: " + str(wplata) + " zl" if wplata > 0 else "")
+                    + (" | Saldo wyzerowane ✓" if rozlicz0 else "")
+                    + (" | Reszta: " + str(reszta) + " zl" if not rozlicz0 and reszta > 0.005 else "")
+                    + (" | Brakuje: " + str(-reszta) + " zl" if not rozlicz0 and reszta < -0.005 else "")
+                    + (" | Rozliczono ✓" if not rozlicz0 and abs(reszta) <= 0.005 else ""))
+            else:
+                flash_msg = "Zapisano: " + str(sprzed) + " szt. x " + str(cena) + " zl = " + str(kwota) + " zl"
+                if rabat > 0: flash_msg += " (rabat: " + str(rabat) + " zl)"
+
             db.commit(); db.close()
-            flash("Zapisano: " + str(sprzed) + " szt. x " + str(cena) + " zl = " + str(kwota) + " zl")
+            flash(flash_msg)
             return redirect("/sprzedaz")
 
         # ── GET ───────────────────────────────────────────────────────────
@@ -184,6 +224,28 @@ def register_sprzedaz(app):
             + "</option>"
             for z in zamow_akt)
 
+        # Saldo klientow dla JS
+        kl_saldo_map = {}
+        for k in klienci_saldo:
+            kl_saldo_map[str(k["id"])] = round(float(k["saldo"] or 0), 2)
+        kl_ceny_map = {}
+        for k in klienci:
+            kl_ceny_map[str(k["id"])] = float(k["cena_indyw"] or 0)
+
+        kl_opt = "<option value=''>— anonimowa —</option>"
+        for k in klienci_saldo:
+            sal = float(k["saldo"] or 0)
+            sal_txt = ""
+            if sal > 0.01: sal_txt = " [dług: " + str(round(sal,2)) + " zł]"
+            elif sal < -0.01: sal_txt = " [nadpłata: " + str(round(-sal,2)) + " zł]"
+            kl_opt += "<option value='" + str(k["id"]) + "' data-saldo='" + str(round(sal,2)) + "'>" + k["nazwa"] + sal_txt + "</option>"
+
+        zam_opt = "<option value=''>— bez zamówienia —</option>" + "".join(
+            "<option value='" + str(z["id"]) + "'>"
+            + z["data_dostawy"] + " · " + (z["kn"] or "?") + " · " + str(z["ilosc"]) + " szt."
+            + "</option>"
+            for z in zamow_akt)
+
         s_formularz = (
             "<div class='card' style='margin-bottom:12px'>"
             "<b style='font-size:15px'>Sprzedaj jaja</b>"
@@ -202,9 +264,9 @@ def register_sprzedaz(app):
             "<div style='background:#f5f5f0;border-radius:8px;padding:8px 12px;"
             "font-size:14px;margin:8px 0'>Wartość: <b id='wartosc'>— zł</b></div>"
             "<div class='g2'>"
-            "<div><label>Klient</label><select name='klient_id'>" + kl_opt + "</select></div>"
+            "<div><label>Klient</label><select name='klient_id' id='kl-sel'>" + kl_opt + "</select></div>"
             "<div><label>Typ płatności</label>"
-            "<select name='typ_sprzedazy'>"
+            "<select name='typ_sprzedazy' id='typ-sel'>"
             "<option value='gotowka'>💵 Gotówka</option>"
             "<option value='przelew'>🏦 Przelew</option>"
             "<option value='nastepnym_razem'>⏳ Następnym razem (dług)</option>"
@@ -215,23 +277,97 @@ def register_sprzedaz(app):
             "<select name='zamowienie_id'>" + zam_opt + "</select></div>"
             "<div><label>Uwagi</label>"
             "<input name='uwagi' placeholder='opcjonalnie'></div>"
+
+            # Blok reszty/wplaty
+            "<div id='blok-wplata' style='margin-top:10px;padding:12px;"
+            "background:#f0f9f0;border-radius:10px;border:1px solid #c8e6c9;display:none'>"
+            "<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end'>"
+            "<div style='flex:1;min-width:100px'>"
+            "<label style='font-size:12px;color:#888'>💵 Ile dał klient (zł)</label>"
+            "<input id='wplata-inp' name='wplata_klienta' type='number' step='0.01'"
+            " min='0' placeholder='0.00' oninput='obliczW()'"
+            " style='font-size:20px;text-align:center'></div>"
+            "<div style='flex:1;min-width:100px'>"
+            "<label style='font-size:12px;color:#888'>🏷 Rabat (zł)</label>"
+            "<input id='rabat-inp' name='rabat' type='number' step='0.01'"
+            " min='0' value='0' oninput='oblicz()'"
+            " style='font-size:16px;text-align:center'></div>"
+            "</div>"
+            "<div style='margin-top:8px'>"
+            "<label style='display:flex;align-items:center;gap:8px;cursor:pointer;"
+            "background:#e8f5e9;border-radius:8px;padding:6px 10px;font-size:13px'>"
+            "<input type='checkbox' id='rozlicz0' name='rozlicz_do_zera' value='1'"
+            " onchange='toggleRozlicz(this)' style='width:16px;height:16px'>"
+            "<span><b>Rozlicz do zera</b> — wpisz dokładnie tyle ile potrzeba i wyzeruj saldo</span>"
+            "</label>"
+            "</div>"
+            "<div id='wplata-info' style='font-size:14px;margin-top:8px;line-height:1.8'></div>"
+            "</div>"
+
             "<button class='btn bg' style='width:100%;margin-top:12px;padding:12px;font-size:15px'>"
             "Zapisz sprzedaż</button>"
             "</form>"
-            "<script>function oblicz(){"
-            "var s=parseFloat(document.querySelector('[name=jaja_sprzedane]').value)||0,"
-            "c=parseFloat(document.getElementById('cena').value)||0;"
-            "document.getElementById('wartosc').textContent=(s*c).toFixed(2)+' zl';}"
+            "<script>"
+            "var _sal=" + str(kl_saldo_map).replace("'",'"') + ";"
+            "var _ceny=" + str(kl_ceny_map).replace("'",'"') + ";"
+            "function oblicz(){"
+            "  var s=parseFloat(document.querySelector('[name=jaja_sprzedane]').value)||0;"
+            "  var c=parseFloat(document.getElementById('cena').value)||0;"
+            "  var r=parseFloat((document.getElementById('rabat-inp')||{value:'0'}).value)||0;"
+            "  var w=Math.max(0,Math.round((s*c-r)*100)/100);"
+            "  document.getElementById('wartosc').textContent=w.toFixed(2)+' zł';"
+            "  obliczW();"
+            "}"
+            "function obliczW(){"
+            "  var s=parseFloat(document.querySelector('[name=jaja_sprzedane]').value)||0;"
+            "  var c=parseFloat(document.getElementById('cena').value)||0;"
+            "  var r=parseFloat((document.getElementById('rabat-inp')||{value:'0'}).value)||0;"
+            "  var wart=Math.max(0,Math.round((s*c-r)*100)/100);"
+            "  var kid=(document.getElementById('kl-sel')||{value:''}).value;"
+            "  var sal=kid?(_sal[kid]||0):0;"
+            "  var dal=parseFloat((document.getElementById('wplata-inp')||{value:'0'}).value)||0;"
+            "  var razem=Math.round((wart+sal)*100)/100;"
+            "  var reszta=Math.round((dal-razem)*100)/100;"
+            "  var info='Do zapłaty z tym razem: <b>'+razem.toFixed(2)+' zł</b>';"
+            "  if(sal>0.01) info+=' <span style=\"color:#A32D2D\">(w tym dług: '+sal.toFixed(2)+' zł)</span>';"
+            "  if(sal<-0.01) info+=' <span style=\"color:#3B6D11\">(nadpłata odliczona: '+(-sal).toFixed(2)+' zł)</span>';"
+            "  if(dal>0.005){"
+            "    if(reszta>0.005) info+='<br><b style=\"color:#3B6D11\">Reszta: '+reszta.toFixed(2)+' zł</b>';"
+            "    else if(reszta<-0.005) info+='<br><b style=\"color:#A32D2D\">Brakuje: '+(-reszta).toFixed(2)+' zł</b>';"
+            "    else info+='<br><b style=\"color:#3B6D11\">Kwota zgadza się ✓</b>';"
+            "  }"
+            "  document.getElementById('wplata-info').innerHTML=info;"
+            "}"
             "document.querySelector('[name=jaja_sprzedane]').addEventListener('input',oblicz);"
-            "var klSel=document.querySelector('[name=klient_id]');if(klSel){klSel.addEventListener('change',function(){"
-            "  var kid=this.value;if(!kid)return;"
-            "  fetch('/api/klient-cena/'+kid).then(function(r){return r.json();}).then(function(d){"
-            "    document.getElementById('cena').value=d.cena;oblicz();"
-            "  }).catch(function(){});"
-            "});};"
+            "document.getElementById('cena').addEventListener('input',oblicz);"
+            "var ks=document.getElementById('kl-sel');"
+            "if(ks){ks.addEventListener('change',function(){"
+            "  var kid=this.value;"
+            "  var bw=document.getElementById('blok-wplata');"
+            "  bw.style.display=kid?'block':'none';"
+            "  if(!kid){document.getElementById('wplata-info').innerHTML='';return;}"
+            "  var ci=_ceny[kid]||0;"
+            "  if(ci>0){document.getElementById('cena').value=ci.toFixed(2);}"
+            "  else fetch('/api/klient-cena/'+kid).then(function(r){return r.json();})"
+            "    .then(function(d){document.getElementById('cena').value=d.cena;oblicz();});"
+            "  obliczW();"
+            "});}"
+"function toggleRozlicz(cb){"
+"  var kid=(document.getElementById('kl-sel')||{value:''}).value;"
+"  var sal=kid?(_sal[kid]||0):0;"
+"  var r=parseFloat((document.getElementById('rabat-inp')||{value:'0'}).value)||0;"
+"  var s=parseFloat(document.querySelector('[name=jaja_sprzedane]').value)||0;"
+"  var c=parseFloat(document.getElementById('cena').value)||0;"
+"  var wart=Math.max(0,Math.round((s*c-r)*100)/100);"
+"  var razem=Math.round((wart+sal)*100)/100;"
+"  var wi=document.getElementById('wplata-inp');"
+"  if(cb.checked&&razem>0.005){wi.value=razem.toFixed(2);obliczW();}"
+"  else if(cb.checked&&razem<=0.005){wi.value='0';obliczW();}"
+"}"
             "</script>"
             "</div>"
         )
+
 
         # ─── 2. LICZNIKI MAGAZYNU ─────────────────────────────────────────
         c_stan = "#3B6D11" if stan > 0 else "#888"
