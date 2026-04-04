@@ -305,6 +305,14 @@ def init_db():
         UNIQUE(gospodarstwo_id, data)
     );
     -- ── SPRZEDAŻ SZCZEGÓŁ ──────────────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS jaja_straty (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        data DATE NOT NULL,
+        ilosc INTEGER NOT NULL DEFAULT 0,
+        powod TEXT DEFAULT 'inne',
+        uwagi TEXT DEFAULT ''
+    );
     CREATE TABLE IF NOT EXISTS sprzedaz_szczegol (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id),

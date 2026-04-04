@@ -142,16 +142,21 @@ def register_sprzedaz(app):
         klienci_saldo = db.execute("""
             SELECT k.id, k.nazwa, k.telefon,
                    COALESCE(ks.saldo_pln, 0) as saldo,
-                   COUNT(DISTINCT p.data) as transakcji,
-                   COALESCE(SUM(CASE WHEN p.jaja_sprzedane>0
-                       THEN p.jaja_sprzedane*COALESCE(p.cena_sprzedazy,0) ELSE 0 END), 0) as total,
-                   MAX(p.data) as ostatnia
+                   COUNT(s.id) as transakcji,
+                   COALESCE(SUM(s.wartosc), 0) as total,
+                   MAX(s.data) as ostatnia
             FROM klienci k
             LEFT JOIN konta_saldo ks ON ks.klient_id=k.id
-            LEFT JOIN produkcja p ON p.klient_id=k.id AND p.gospodarstwo_id=?
+            LEFT JOIN sprzedaz_szczegol s ON s.klient_id=k.id AND s.gospodarstwo_id=?
             WHERE k.gospodarstwo_id=?
             GROUP BY k.id ORDER BY ABS(COALESCE(ks.saldo_pln,0)) DESC, k.nazwa""",
             (g, g)).fetchall()
+
+        # Anonimowe sprzedaze (bez klienta)
+        anon = db.execute(
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(ilosc),0) as szt, COALESCE(SUM(wartosc),0) as total"
+            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND klient_id IS NULL"
+            " AND data>=? AND data<=?", (g, data_od, data_do)).fetchone()
 
         # Aktywne zamówienia do wyświetlenia
         zam_aktywne = db.execute(
@@ -398,12 +403,27 @@ def register_sprzedaz(app):
                 + "</div>"
             )
 
+        # Kafelek anonimowych
+        anon_html = ""
+        if anon and anon["cnt"] > 0:
+            anon_html = (
+                "<div class='card' style='border-left:4px solid #888;margin-bottom:8px'>"
+                "<div style='font-weight:600;font-size:15px;color:#888'>— Anonimowa sprzedaż</div>"
+                "<div style='font-size:13px;color:#888;margin-top:4px'>"
+                + str(anon["cnt"]) + " transakcji · " + str(int(anon["szt"])) + " szt. · "
+                + str(round(float(anon["total"]),2)) + " zł w wybranym zakresie"
+                + "</div>"
+                "<div style='font-size:12px;color:#aaa;margin-top:3px'>Brak przypisanego klienta</div>"
+                "</div>"
+            )
+
         s_klienci = (
             "<div style='display:flex;justify-content:space-between;align-items:center;"
             "margin-bottom:8px;flex-wrap:wrap;gap:8px'>"
             "<b style='font-size:15px'>👥 Klienci</b>"
             "<a href='/klienci/dodaj' class='btn bp bsm'>+ Nowy klient</a>"
             "</div>"
+            + anon_html
             + (kl_html or
                "<div class='card'><p style='color:#888;text-align:center;padding:20px'>"
                "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p></div>")
