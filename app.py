@@ -160,7 +160,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   <span class="nb-farm" title="{{ farm_name }}">{{ farm_name }}</span>
   <div class="nb-links">
     <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
-    <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Magazyn</a>
+    <a href="/magazyn-jaj" class="nl {{ 'on' if p in ['prod','stado','mag_jaj'] }}">Magazyn</a>
     <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
 
     <div class="ni">
@@ -264,7 +264,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
 <div class="dr" id="dr">
   <a href="/" class="dr-fl {{ 'on' if p=='dash' }}" onclick="drClose()">&#x1F3E0; Dashboard</a>
 
-  <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F95A; Magazyn</a>
+  <a href="/magazyn-jaj" class="dr-fl {{ 'on' if p in ['prod','stado','mag_jaj'] }}" onclick="drClose()">&#x1F95A; Magazyn</a>
 
   <a href="/sprzedaz" class="dr-fl {{ 'on' if p in ['zam','mag','sprzedaz'] }}" onclick="drClose()">&#x1F4E6; Sprzeda&#380;</a>
 
@@ -708,30 +708,6 @@ def _kafelki_czynnosci(g, db_cz=None):
     )
 
 
-
-@app.route("/produkcja/dodaj", methods=["POST"])
-@farm_required
-def produkcja_dodaj():
-    g = gid()
-    d    = request.form.get("data", date.today().isoformat())
-    jaja = int(request.form.get("jaja_zebrane", 0) or 0)
-    uwagi = request.form.get("uwagi", "")
-    # Pasza — tylko jeśli jawnie podana w formularzu (nie nadpisuj automatycznie)
-    pasza_raw = request.form.get("pasza_wydana_kg", "")
-    db = get_db()
-    ex = db.execute("SELECT id, pasza_wydana_kg FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, d)).fetchone()
-    if ex:
-        # Zachowaj istniejącą paszę jeśli nie podano nowej
-        pasza = float(pasza_raw) if pasza_raw.strip() != "" else float(ex["pasza_wydana_kg"] or 0)
-        db.execute("UPDATE produkcja SET jaja_zebrane=?, pasza_wydana_kg=?, uwagi=? WHERE id=?",
-                   (jaja, pasza, uwagi, ex["id"]))
-    else:
-        pasza = float(pasza_raw) if pasza_raw.strip() != "" else 0
-        db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg,uwagi) VALUES(?,?,?,0,0,?,?)",
-                   (g, d, jaja, pasza, uwagi))
-    db.commit(); db.close()
-    flash("Zapisano: " + str(jaja) + " jaj (" + d + ")")
-    return redirect("/")
 
 
 @app.route("/ustaw-zakres", methods=["POST"])

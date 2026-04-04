@@ -1738,21 +1738,14 @@ def register_routes(app):
         return R(html,"ana")
 
     @app.route("/magazyn", methods=["GET","POST"])
-    @app.route("/magazyn")
     @farm_required
-    def magazyn_redirect():
-        return redirect("/magazyn-jaj")
-
-    @app.route("/magazyn-jaj", methods=["GET","POST"])
-    @farm_required
-    def magazyn():
-        g=gid(); db=get_db()
-        action = request.form.get("action","") if request.method=="POST" else ""
-
+    def magazyn_compat():
+        """Wszystkie stare URLe magazynu - POST obsługuje straty, GET -> /produkcja"""
+        from flask import redirect as _red
+        g = gid(); db = get_db()
         if request.method == "POST":
-
+            action = request.form.get("action","")
             if action == "strata":
-                # Zapis straty (stluczone, zepsute, zgubione)
                 ile   = int(request.form.get("strata_ile",0) or 0)
                 powod = request.form.get("strata_powod","inne")
                 uwagi = request.form.get("strata_uwagi","")
@@ -1762,19 +1755,9 @@ def register_routes(app):
                         "INSERT INTO jaja_straty(gospodarstwo_id,data,ilosc,powod,uwagi) VALUES(?,?,?,?,?)",
                         (g, data_s, ile, powod, uwagi))
                     db.commit()
-                    cena_def = float(db.execute(
-                        "SELECT wartosc FROM ustawienia WHERE klucz='cena_jajka' AND gospodarstwo_id=?",
-                        (g,)).fetchone()["wartosc"] if db.execute(
-                        "SELECT wartosc FROM ustawienia WHERE klucz='cena_jajka' AND gospodarstwo_id=?",
-                        (g,)).fetchone() else type("x",(),{"wartosc":"1.20"})())
-                    try: cena_def = float(db.execute("SELECT wartosc FROM ustawienia WHERE klucz='cena_jajka' AND gospodarstwo_id=?", (g,)).fetchone()["wartosc"])
-                    except: cena_def = 1.20
-                    flash(str(ile) + " jaj — strata: " + powod +
-                          " (pot. strata: " + str(round(ile * cena_def, 2)) + " zl)")
-                db.close(); return redirect("/magazyn")
-
+                    flash(str(ile) + " jaj — strata: " + powod)
+                db.close(); return _red("/magazyn-jaj")
             if action == "za0":
-                # Sprzedaż/oddanie za darmo
                 ile   = int(request.form.get("za0_ile",0) or 0)
                 powod = request.form.get("za0_powod","gratis")
                 uwagi = request.form.get("za0_uwagi","")
@@ -1783,201 +1766,18 @@ def register_routes(app):
                     db.execute(
                         "INSERT INTO sprzedaz_szczegol(gospodarstwo_id,data,ilosc,cena_szt,wartosc,typ,uwagi) VALUES(?,?,?,0,0,?,?)",
                         (g, data_z, ile, "za0", (powod + " " + uwagi).strip()))
-                    # Aktualizuj produkcja
                     ex = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, data_z)).fetchone()
                     if ex:
                         db.execute(
                             "UPDATE produkcja SET jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?) WHERE id=?",
                             (g, data_z, ex["id"]))
                     db.commit()
-                    flash(str(ile) + " jaj oddano za darmo: " + powod)
-                db.close(); return redirect("/magazyn")
-
-            # Stara korekta (znalezione/blad liczenia)
-            korekta = int(request.form.get("korekta",0) or 0)
-            powod   = request.form.get("powod_korekty","korekta")
-            data_k  = request.form.get("data_korekty", date.today().isoformat())
-            if korekta and korekta != 0:
-                ex = db.execute("SELECT id, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, data_k)).fetchone()
-                if ex:
-                    nowe = max(0, ex["jaja_zebrane"] + korekta)
-                    db.execute("UPDATE produkcja SET jaja_zebrane=?, uwagi=? WHERE id=?",
-                               (nowe, powod + (" +" if korekta > 0 else " ") + str(korekta), ex["id"]))
-                    db.commit()
-                    flash(("+" if korekta > 0 else "") + str(korekta) + " jaj — korekta: " + powod)
-                elif korekta > 0:
-                    db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,uwagi) VALUES(?,?,?,0,?)",
-                               (g, data_k, korekta, powod))
-                    db.commit()
-                    flash("+" + str(korekta) + " jaj — korekta: " + powod)
-                else:
-                    flash("Brak wpisu produkcji na ten dzien.")
-            db.close(); return redirect("/magazyn")
-
-        # ── GET ──────────────────────────────────────────────────────────
-        cena_def = 1.20
-        try: cena_def = float(db.execute("SELECT wartosc FROM ustawienia WHERE klucz='cena_jajka' AND gospodarstwo_id=?", (g,)).fetchone()["wartosc"])
-        except: pass
-
-        mag = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-        stan_surowy = max(0, int(mag["p"]) - int(mag["s"]))
-
-        # Straty łącznie
-        straty_total = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?", (g,)).fetchone()["s"]
-        straty_mies  = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
-        stan = max(0, stan_surowy - int(straty_total))
-
-        # Za darmo (cena=0)
-        za0_mies = db.execute("SELECT COALESCE(SUM(ilosc),0) as s, COALESCE(SUM(wartosc),0) as w FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND cena_szt=0 AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
-
-        # Potencjalna strata
-        pot_strata = round((int(straty_mies) + int(za0_mies["s"])) * cena_def, 2)
-
-        rez = db.execute("SELECT z.*,k.nazwa as kn FROM zamowienia z LEFT JOIN klienci k ON z.klient_id=k.id WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone') ORDER BY z.data_dostawy", (g,)).fetchall()
-        zar = sum(r["ilosc"] for r in rez)
-
-        # Historia strat (ostatnie 30)
-        straty_hist = db.execute("SELECT * FROM jaja_straty WHERE gospodarstwo_id=? ORDER BY data DESC, id DESC LIMIT 30", (g,)).fetchall()
-        # Historia za0 (ostatnie 20)
-        za0_hist = db.execute("SELECT * FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND cena_szt=0 ORDER BY data DESC, id DESC LIMIT 20", (g,)).fetchall()
-        # Historia produkcji
-        hist = db.execute("SELECT data, jaja_zebrane, jaja_sprzedane, uwagi FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 30", (g,)).fetchall()
+                    flash(str(ile) + " jaj za darmo: " + powod)
+                db.close(); return _red("/magazyn-jaj")
+            db.close(); return _red("/magazyn-jaj")
         db.close()
+        return _red("/magazyn-jaj")
 
-        POWOD_ICO = {"stluczone":"🥚","zepsute":"🤢","zgubione":"🔍","gratis":"🎁","probka":"🧪","inne":"📋"}
-        POWOD_LAB = {"stluczone":"Stłuczone","zepsute":"Zepsute","zgubione":"Zgubione/inne","gratis":"Za darmo","probka":"Próbka","inne":"Inne"}
-
-        dzis = date.today().isoformat()
-
-        # Kafelki statystyk
-        s_stats = (
-            "<div class='g4' style='margin-bottom:12px'>"
-            "<div class='card stat'><div class='v' style='color:" + ("#3B6D11" if stan>0 else "#888") + "'>" + str(stan) + "</div><div class='l'>W magazynie</div><div class='s'>po odliczeniu strat</div></div>"
-            "<div class='card stat'><div class='v' style='color:#BA7517'>" + str(zar) + "</div><div class='l'>Zarezerwowane</div><div class='s'>w zamówieniach</div></div>"
-            "<div class='card stat'><div class='v' style='color:#A32D2D'>" + str(int(straty_mies)) + "</div><div class='l'>Straty miesiąc</div><div class='s'>stłuczki/zepsute</div></div>"
-            "<div class='card stat'><div class='v' style='color:#A32D2D'>" + str(round(pot_strata,2)) + " zł</div><div class='l'>Pot. strata</div><div class='s'>straty+gratis × cena</div></div>"
-            "</div>"
-        )
-
-        # Formularz strat
-        s_strata = (
-            "<div class='card' style='margin-bottom:10px'>"
-            "<b>🥚 Dodaj stratę</b>"
-            "<p style='font-size:12px;color:#888;margin:4px 0'>Stłuczki, zepsute, zagubione — odliczane od stanu magazynu.</p>"
-            "<form method='POST' style='margin-top:10px'>"
-            "<input type='hidden' name='action' value='strata'>"
-            "<div class='g3'>"
-            "<div><label>Ilość (szt.)</label>"
-            "<input name='strata_ile' type='number' min='1' placeholder='np. 3'"
-            " style='font-size:18px;text-align:center'></div>"
-            "<div><label>Powód</label>"
-            "<select name='strata_powod'>"
-            + "".join("<option value='" + k + "'>" + POWOD_ICO.get(k,"") + " " + POWOD_LAB.get(k,k) + "</option>"
-                      for k in ["stluczone","zepsute","zgubione","inne"])
-            + "</select></div>"
-            "<div><label>Data</label>"
-            "<input name='strata_data' type='date' value='" + dzis + "'></div>"
-            "</div>"
-            "<input name='strata_uwagi' placeholder='Uwagi (opcjonalnie)' style='margin-top:6px'>"
-            "<button class='btn br bsm' style='margin-top:8px'>Zapisz stratę</button>"
-            "</form></div>"
-        )
-
-        # Formularz za 0
-        s_za0 = (
-            "<div class='card' style='margin-bottom:10px'>"
-            "<b>🎁 Oddane za darmo / próbka</b>"
-            "<p style='font-size:12px;color:#888;margin:4px 0'>Wydane bez przychodu — liczone do pot. straty.</p>"
-            "<form method='POST' style='margin-top:10px'>"
-            "<input type='hidden' name='action' value='za0'>"
-            "<div class='g3'>"
-            "<div><label>Ilość (szt.)</label>"
-            "<input name='za0_ile' type='number' min='1' placeholder='np. 12'"
-            " style='font-size:18px;text-align:center'></div>"
-            "<div><label>Rodzaj</label>"
-            "<select name='za0_powod'>"
-            "<option value='gratis'>🎁 Za darmo</option>"
-            "<option value='probka'>🧪 Próbka</option>"
-            "<option value='inne'>📋 Inne</option>"
-            "</select></div>"
-            "<div><label>Data</label>"
-            "<input name='za0_data' type='date' value='" + dzis + "'></div>"
-            "</div>"
-            "<input name='za0_uwagi' placeholder='Dla kogo / uwagi' style='margin-top:6px'>"
-            "<button class='btn bo bsm' style='margin-top:8px'>Zapisz</button>"
-            "</form></div>"
-        )
-
-        # Historia strat
-        sh_rows = "".join(
-            "<tr>"
-            "<td style='font-size:12px'>" + r["data"] + "</td>"
-            "<td style='font-weight:700;color:#A32D2D;text-align:center'>-" + str(r["ilosc"]) + "</td>"
-            "<td>" + POWOD_ICO.get(r["powod"],"") + " " + POWOD_LAB.get(r["powod"],r["powod"]) + "</td>"
-            "<td style='font-size:11px;color:#888'>" + (r["uwagi"] or "") + "</td>"
-            "<td style='font-size:11px;color:#A32D2D'>" + str(round(r["ilosc"]*cena_def,2)) + " zł</td>"
-            "</tr>" for r in straty_hist)
-
-        # Historia za 0
-        z0_rows = "".join(
-            "<tr>"
-            "<td style='font-size:12px'>" + r["data"] + "</td>"
-            "<td style='font-weight:700;color:#888;text-align:center'>" + str(r["ilosc"]) + "</td>"
-            "<td>" + (r["uwagi"] or "—") + "</td>"
-            "<td style='font-size:11px;color:#A32D2D'>" + str(round(r["ilosc"]*cena_def,2)) + " zł</td>"
-            "</tr>" for r in za0_hist)
-
-        # Historia produkcji
-        w_hist = "".join(
-            "<tr>"
-            "<td style='font-size:12px'>" + r["data"] + "</td>"
-            "<td style='text-align:center;font-weight:600'>" + str(r["jaja_zebrane"]) + "</td>"
-            "<td style='text-align:center'>" + str(r["jaja_sprzedane"]) + "</td>"
-            "<td style='text-align:center;color:#888'>" + str(max(0,r["jaja_zebrane"]-r["jaja_sprzedane"])) + "</td>"
-            "<td style='font-size:11px;color:#888'>" + (r["uwagi"] or "") + "</td>"
-            "</tr>" for r in hist)
-
-        w_rez = "".join(
-            "<tr><td>" + r["data_dostawy"] + "</td><td>" + (r["kn"] or "—") + "</td>"
-            "<td style='font-weight:500'>" + str(r["ilosc"]) + " szt.</td>"
-            "<td>" + str(round(r["ilosc"]*(r["cena_za_szt"] or 0),2)) + " zł</td>"
-            "<td><a href='/zamowienia/" + str(r["id"]) + "/status/dostarczone' class='btn bg bsm'>Dostarcz</a></td>"
-            "</tr>" for r in rez)
-
-        html = (
-            "<h1>Magazyn jaj</h1>"
-            + s_stats
-
-            + "<div class='g2' style='margin-bottom:10px'>"
-            + s_strata + s_za0
-            + "</div>"
-
-            + ("<div class='card' style='margin-bottom:10px'><b>Zamówienia do realizacji</b>"
-               "<div style='overflow-x:auto'><table style='margin-top:8px;font-size:13px'><thead><tr>"
-               "<th>Data</th><th>Klient</th><th>Ilość</th><th>Wartość</th><th></th></tr></thead>"
-               "<tbody>" + w_rez + "</tbody></table></div></div>" if rez else "")
-
-            + "<div class='g2'>"
-            + "<div class='card'><b>Historia strat</b>"
-            + ("<div style='overflow-x:auto'><table style='font-size:13px;margin-top:8px'><thead><tr>"
-               "<th>Data</th><th>Szt.</th><th>Powód</th><th>Uwagi</th><th>Pot. strata</th></tr></thead>"
-               "<tbody>" + (sh_rows or "<tr><td colspan=5 style='color:#888;text-align:center;padding:10px'>Brak strat</td></tr>") + "</tbody></table></div>")
-            + "</div>"
-            + "<div class='card'><b>Oddane za darmo</b>"
-            + ("<div style='overflow-x:auto'><table style='font-size:13px;margin-top:8px'><thead><tr>"
-               "<th>Data</th><th>Szt.</th><th>Opis</th><th>Pot. strata</th></tr></thead>"
-               "<tbody>" + (z0_rows or "<tr><td colspan=4 style='color:#888;text-align:center;padding:10px'>Brak</td></tr>") + "</tbody></table></div>")
-            + "</div>"
-            + "</div>"
-
-            + "<div class='card' style='margin-top:10px'><b>Historia produkcji 30 dni</b>"
-            "<div style='overflow-x:auto'><table style='font-size:13px;margin-top:8px'><thead><tr>"
-            "<th>Data</th><th style='text-align:center'>Zebrane</th>"
-            "<th style='text-align:center'>Sprzedane</th><th style='text-align:center'>Zostało</th>"
-            "<th>Uwagi</th></tr></thead>"
-            "<tbody>" + (w_hist or "<tr><td colspan=5 style='color:#888;padding:10px'>Brak</td></tr>") + "</tbody></table></div></div>"
-        )
-        return R(html, "mag_jaj")
 
     # ─── USTAWIENIA + KIOSK + IMPORT + ADMIN ─────────────────────────────────
     @app.route("/ustawienia", methods=["GET","POST"])

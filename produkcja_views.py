@@ -15,14 +15,50 @@ def register_produkcja(app):
 
     # ─── PRODUKCJA — tylko zbiory jaj ─────────────────────────────────────
 
+    @app.route("/magazyn-jaj", methods=["GET","POST"])
     @app.route("/produkcja", methods=["GET","POST"])
     @app.route("/produkcja/dodaj", methods=["POST"])
     @farm_required
     def produkcja():
         g = gid(); db = get_db()
 
-        # ── POST: zapis zebranych jaj ──────────────────────────────────────
+        # ── POST ─────────────────────────────────────────────────────────
         if request.method == "POST":
+            action = request.form.get("action", "")
+
+            if action == "strata":
+                ile   = int(request.form.get("strata_ile", 0) or 0)
+                powod = request.form.get("strata_powod", "inne")
+                uwagi = request.form.get("strata_uwagi", "")
+                data_s = request.form.get("strata_data", date.today().isoformat())
+                if ile > 0:
+                    db.execute(
+                        "INSERT INTO jaja_straty(gospodarstwo_id,data,ilosc,powod,uwagi) VALUES(?,?,?,?,?)",
+                        (g, data_s, ile, powod, uwagi))
+                    db.commit()
+                    flash(str(ile) + " jaj — strata: " + powod)
+                db.close(); return redirect("/magazyn-jaj")
+
+            if action == "za0":
+                ile   = int(request.form.get("za0_ile", 0) or 0)
+                powod = request.form.get("za0_powod", "gratis")
+                uwagi = request.form.get("za0_uwagi", "")
+                data_z = request.form.get("za0_data", date.today().isoformat())
+                if ile > 0:
+                    db.execute(
+                        "INSERT INTO sprzedaz_szczegol(gospodarstwo_id,data,ilosc,cena_szt,wartosc,typ,uwagi)"
+                        " VALUES(?,?,?,0,0,?,?)",
+                        (g, data_z, ile, "za0", (powod + " " + uwagi).strip()))
+                    ex0 = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, data_z)).fetchone()
+                    if ex0:
+                        db.execute(
+                            "UPDATE produkcja SET jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?) WHERE id=?",
+                            (g, data_z, ex0["id"]))
+                    db.commit()
+                    flash(str(ile) + " jaj za darmo: " + powod)
+                db.close(); return redirect("/magazyn-jaj")
+
+            # Domyślnie: zapis zebranych jaj
             d     = request.form.get("data", date.today().isoformat())
             jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
             uwagi = request.form.get("uwagi", "")
@@ -39,7 +75,7 @@ def register_produkcja(app):
                     (g, d, jaja, uwagi))
             db.commit(); db.close()
             flash("Zapisano: " + str(jaja) + " szt. — " + d)
-            return redirect("/produkcja")
+            return redirect("/magazyn-jaj")
 
         # ── GET ────────────────────────────────────────────────────────────
         kur = int(db.execute(
@@ -177,7 +213,7 @@ def register_produkcja(app):
             "<b>Dodaj strate / za darmo</b>"
             "<div style='display:flex;gap:12px;margin-top:10px;flex-wrap:wrap'>"
 
-            "<form method='POST' action='/magazyn-jaj'"
+            "<form method='POST' action='/produkcja'"
             " style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;flex:1'>"
             "<input type='hidden' name='action' value='strata'>"
             "<div><label style='font-size:11px'>Stluczki/zepsute (szt.)</label>"
@@ -193,7 +229,7 @@ def register_produkcja(app):
             "<button class='btn br bsm'>Zapisz strate</button>"
             "</form>"
 
-            "<form method='POST' action='/magazyn-jaj'"
+            "<form method='POST' action='/produkcja'"
             " style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;flex:1'>"
             "<input type='hidden' name='action' value='za0'>"
             "<div><label style='font-size:11px'>Oddane za darmo (szt.)</label>"
@@ -241,14 +277,33 @@ def register_produkcja(app):
         for r in rows:
             niesn = round(r["jaja_zebrane"] / kur * 100, 1) if kur else 0
             kol = "#3B6D11" if niesn >= 80 else "#BA7517" if niesn >= 60 else "#A32D2D"
+            _rid = "r" + r["data"].replace("-","")
+            _uwagi_esc = (r["uwagi"] or "").replace("'","&#39;")
             rows_html += (
                 "<tr>"
                 "<td style='white-space:nowrap;font-size:13px'>" + r["data"] + "</td>"
                 "<td style='font-weight:700;font-size:16px;text-align:center'>" + str(r["jaja_zebrane"]) + "</td>"
                 "<td style='color:" + kol + ";font-weight:600;text-align:center'>" + str(niesn) + "%</td>"
                 "<td style='color:#888;font-size:12px'>" + (r["uwagi"] or "") + "</td>"
-                "<td><a href='/produkcja/edytuj/" + r["data"] + "' class='btn bo bsm' style='font-size:11px'>Edytuj</a></td>"
+                "<td><button class='btn bo bsm' style='font-size:11px'"
+                " onclick='var e=document.getElementById(\"" + _rid + "\");"
+                "e.style.display=e.style.display===\"none\"?\"table-row\":\"none\"'>Edytuj</button></td>"
                 "</tr>"
+                "<tr id='" + _rid + "' style='display:none;background:#f8f8f4'>"
+                "<td colspan=5 style='padding:8px 12px'>"
+                "<form method='POST'"
+                " style='display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap'>"
+                "<input type='hidden' name='data' value='" + r["data"] + "'>"
+                "<div><label style='font-size:11px'>Zebrane (szt.)</label>"
+                "<input name='jaja_zebrane' type='number' min='0'"
+                " value='" + str(r["jaja_zebrane"]) + "'"
+                " style='width:90px;font-size:16px;text-align:center'></div>"
+                "<div style='flex:2;min-width:120px'><label style='font-size:11px'>Uwagi</label>"
+                "<input name='uwagi' value='" + _uwagi_esc + "' style='font-size:13px'></div>"
+                "<button class='btn bp bsm'>Zapisz</button>"
+                "<button type='button' class='btn bo bsm'"
+                " onclick='document.getElementById(\"" + _rid + "\").style.display=\"none\"'>Anuluj</button>"
+                "</form></td></tr>"
             )
 
         s_historia = (
@@ -282,7 +337,7 @@ def register_produkcja(app):
         r = db.execute(
             "SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, data)).fetchone()
         if not r:
-            db.close(); flash("Nie znaleziono wpisu."); return redirect("/produkcja")
+            db.close(); flash("Nie znaleziono wpisu."); return redirect("/magazyn-jaj")
 
         if request.method == "POST":
             jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
@@ -293,7 +348,7 @@ def register_produkcja(app):
                 "WHERE gospodarstwo_id=? AND data=?", (jaja, uwagi, pasza, g, data))
             db.commit(); db.close()
             flash(f"Wpis {data} zaktualizowany.")
-            return redirect("/produkcja")
+            return redirect("/magazyn-jaj")
         db.close()
 
         html = (
@@ -776,6 +831,6 @@ def register_produkcja(app):
         db.execute("DELETE FROM jaja_straty WHERE id=? AND gospodarstwo_id=?", (sid, g))
         db.commit(); db.close()
         flash("Strata usunieta.")
-        return redirect("/produkcja")
+        return redirect("/magazyn-jaj")
 
     return app

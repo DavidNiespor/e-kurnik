@@ -472,7 +472,7 @@ def register_sprzedaz(app):
             "<span style='font-size:13px'>Za darmo: <b style='color:#888'>" + str(za0_mies) + " szt.</b></span>"
             "<span style='font-size:13px'>Pot. strata: <b style='color:#A32D2D'>" + str(pot_strata) + " zl</b></span>"
             "</div>"
-            "<form method='POST' action='/magazyn-jaj' style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+            "<form method='POST' action='/produkcja' style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
             "<input type='hidden' name='action' value='strata'>"
             "<div><label style='font-size:11px'>Ilosc strat (szt.)</label>"
             "<input name='strata_ile' type='number' min='1' placeholder='np. 3' style='width:80px;font-size:14px;text-align:center'></div>"
