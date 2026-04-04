@@ -29,6 +29,13 @@ def register_produkcja(app):
             "SELECT COALESCE(SUM(jaja_zebrane),0) as sum_zeb, "
             "COALESCE(AVG(jaja_zebrane),0) as avg_zeb, COUNT(*) as dni "
             "FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
+        # Stan magazynu
+        mag = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
+        straty_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?", (g,)).fetchone()["s"] if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else 0)
+        stan_mag = max(0, int(mag["p"]) - int(mag["s"]) - straty_tot)
+        rez = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"])
+        straty_mies = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')" if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else "SELECT 0 as s", (g,) if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jaja_straty'").fetchone() else ()).fetchone()["s"])
+        cena_def = float(gs("cena_jajka","1.20"))
         db.close()
 
         rows_html = ""
@@ -48,19 +55,20 @@ def register_produkcja(app):
         html = (
             "<h1>Produkcja jaj</h1>"
             "<div style='display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap'>"
-            "<a href='/sprzedaz' class='btn bo bsm'>→ Historia sprzedaży</a>"
+            "<a href='/sprzedaz' class='btn bo bsm'>Sprzedaz →</a>"
             "</div>"
-            + (f"<div class='g3' style='margin-bottom:12px'>"
-               f"<div class='card stat'><div class='v'>{int(stat['sum_zeb'])}</div><div class='l'>Zebrano w miesiącu</div></div>"
-               f"<div class='card stat'><div class='v'>{round(stat['avg_zeb'],1)}</div><div class='l'>Średnio / dzień</div></div>"
-               f"<div class='card stat'><div class='v'>{stat['dni']}</div><div class='l'>Dni z wpisem</div></div>"
-               f"</div>")
+            + f"<div class='g4' style='margin-bottom:12px'>"
+            f"<div class='card stat'><div class='v'>{int(stat['sum_zeb'])}</div><div class='l'>Zebrano w mies.</div></div>"
+            f"<div class='card stat'><div class='v'>{round(stat['avg_zeb'],1)}</div><div class='l'>Srednio / dzien</div></div>"
+            f"<div class='card stat'><div class='v' style='color:#3B6D11'>{stan_mag}</div><div class='l'>W magazynie</div><div class='s'>rez. {rez} szt.</div></div>"
+            f"<div class='card stat'><div class='v' style='color:#A32D2D'>{straty_mies}</div><div class='l'>Straty mies.</div><div class='s'>{round(straty_mies*cena_def,2)} zl</div></div>"
+            "</div>"
             + "<div class='card' style='overflow-x:auto'>"
             "<table><thead><tr>"
             "<th>Data</th><th style='text-align:center'>Zebrane</th>"
-            "<th style='text-align:center'>Nieśność</th><th>Uwagi</th><th></th>"
+            "<th style='text-align:center'>Niesnosc</th><th>Uwagi</th><th></th>"
             "</tr></thead>"
-            f"<tbody>{rows_html or '<tr><td colspan=5 style=\"color:#888;text-align:center;padding:20px\">Brak wpisów</td></tr>'}</tbody>"
+            f"<tbody>{rows_html or '<tr><td colspan=5 style=\"color:#888;text-align:center;padding:20px\">Brak wpisow</td></tr>'}</tbody>"
             "</table></div>"
         )
         return R(html, "prod")

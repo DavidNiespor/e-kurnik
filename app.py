@@ -162,7 +162,6 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
     <a href="/" class="nl {{ 'on' if p=='dash' }}">Dashboard</a>
     <a href="/produkcja" class="nl {{ 'on' if p in ['prod','stado'] }}">Hodowla</a>
     <a href="/sprzedaz" class="nl {{ 'on' if p in ['zam','mag','sprzedaz'] }}">Sprzeda&#380;</a>
-    <a href="/magazyn-jaj" class="nl {{ 'on' if p=='mag_jaj' }}">&#x1F95A; Magazyn</a>
 
     <div class="ni">
       <button class="nl {{ 'on' if p in ['wyd','pasza','woda','stado'] }}">Zasoby <span class="ar">&#9660;</span></button>
@@ -268,7 +267,6 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
   <a href="/produkcja" class="dr-fl {{ 'on' if p in ['prod','stado'] }}" onclick="drClose()">&#x1F414; Hodowla</a>
 
   <a href="/sprzedaz" class="dr-fl {{ 'on' if p in ['zam','mag','sprzedaz'] }}" onclick="drClose()">&#x1F4E6; Sprzeda&#380;</a>
-  <a href="/magazyn-jaj" class="dr-fl {{ 'on' if p=='mag_jaj' }}" onclick="drClose()">&#x1F95A; Magazyn jaj</a>
 
   <div class="dr-sec" id="ds-zas">
     <div class="dr-hd" onclick="drSec('ds-zas')">
