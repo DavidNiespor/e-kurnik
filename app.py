@@ -730,15 +730,12 @@ def dashboard():
     kur = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 50
     prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as s, AVG(jaja_zebrane) as a FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-7 days')", (g,)).fetchone()
     nies = round((prod["a"] or 0)/kur*100,1) if kur else 0
-    mag_prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-    _sp_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
-    _st_tot = 0
-    try: _st_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
-    except Exception: pass
-    mag_stan = max(0, int(mag_prod["p"]) - _sp_tot - _st_tot)
+    from db import stan_magazynu as _sm
+    mag_stan = _sm(db, g)
     zarez = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
-    mag_stan = max(0, int(mag_prod["p"]) - _sp_tot - _st_tot)
-    zysk = db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
+    _z1 = float(db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"])
+    _z2 = float(db.execute("SELECT COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as s FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now') AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)", (g,)).fetchone()["s"])
+    zysk = _z1 + _z2
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
     ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 7", (g,)).fetchall()

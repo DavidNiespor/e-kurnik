@@ -129,17 +129,9 @@ def register_sprzedaz(app):
 
         db = get_db()
 
-        # Stan magazynu — zebrane minus wszystkie transakcje minus straty
-        zebrane_tot = int(db.execute(
-            "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=?",
-            (g,)).fetchone()["s"])
-        sprzedane_tot = int(db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=?",
-            (g,)).fetchone()["s"])
-        straty_tot_s = int(db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?",
-            (g,)).fetchone()["s"])
-        stan = max(0, zebrane_tot - sprzedane_tot - straty_tot_s)
+        # Stan magazynu
+        from db import stan_magazynu as _sm
+        stan = _sm(db, g)
         rez = db.execute(
             "SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia"
             " WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
@@ -164,25 +156,46 @@ def register_sprzedaz(app):
             WHERE s.gospodarstwo_id=? AND s.data >= ? AND s.data <= ?
             ORDER BY s.data DESC, s.id DESC""", (g, data_od, data_do)).fetchall()
 
-        # Statystyki w zakresie
-        stat_zakres = db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as szt,"
-            " COALESCE(SUM(wartosc),0) as przychod"
-            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
-            " AND data>=? AND data<=?",
+        # Statystyki w zakresie - uwzgledniaj stare dane (produkcja) i nowe (sprzedaz_szczegol)
+        # Dla dni bez sprzedaz_szczegol uzyj produkcja.jaja_sprzedane * cena_sprzedazy
+        _sz = db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as szt, COALESCE(SUM(wartosc),0) as przychod"
+            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data>=? AND data<=?",
             (g, data_od, data_do)).fetchone()
+        _sp = db.execute(
+            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
+            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as przychod"
+            " FROM produkcja WHERE gospodarstwo_id=? AND data>=? AND data<=?"
+            " AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss"
+            "   WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)",
+            (g, data_od, data_do)).fetchone()
+        stat_zakres = {
+            "szt": int(_sz["szt"]) + int(_sp["szt"]),
+            "przychod": float(_sz["przychod"]) + float(_sp["przychod"])
+        }
 
         koszty_zakres = db.execute(
             "SELECT COALESCE(SUM(wartosc_total),0) as koszty"
             " FROM wydatki WHERE gospodarstwo_id=? AND data>=? AND data<=?",
             (g, data_od, data_do)).fetchone()
 
-        # Statystyki bieżący miesiąc (do kafelka)
-        stat = db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as szt,"
-            " COALESCE(SUM(wartosc),0) as kwota"
+        # Statystyki bieżący miesiąc
+        _sz2 = db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as szt, COALESCE(SUM(wartosc),0) as kwota"
             " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
             " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
+        _sp2 = db.execute(
+            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
+            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as kwota"
+            " FROM produkcja WHERE gospodarstwo_id=?"
+            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')"
+            " AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss"
+            "   WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)",
+            (g,)).fetchone()
+        stat = {
+            "szt": int(_sz2["szt"]) + int(_sp2["szt"]),
+            "kwota": float(_sz2["kwota"]) + float(_sp2["kwota"])
+        }
 
         # Klienci z saldami
         klienci_saldo = db.execute("""
