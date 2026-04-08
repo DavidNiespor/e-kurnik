@@ -737,7 +737,7 @@ def dashboard():
     except Exception: pass
     mag_stan = max(0, int(mag_prod["p"]) - _sp_tot - _st_tot)
     zarez = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
-    mag_stan = max(0, mag_prod["p"] - mag_prod["s"])
+    mag_stan = max(0, int(mag_prod["p"]) - _sp_tot - _st_tot)
     zysk = db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
