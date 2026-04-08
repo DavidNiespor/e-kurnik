@@ -730,7 +730,12 @@ def dashboard():
     kur = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 50
     prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as s, AVG(jaja_zebrane) as a FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-7 days')", (g,)).fetchone()
     nies = round((prod["a"] or 0)/kur*100,1) if kur else 0
-    mag_prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
+    mag_prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
+    _sp_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
+    _st_tot = 0
+    try: _st_tot = int(db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
+    except Exception: pass
+    mag_stan = max(0, int(mag_prod["p"]) - _sp_tot - _st_tot)
     zarez = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
     mag_stan = max(0, mag_prod["p"] - mag_prod["s"])
     zysk = db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]

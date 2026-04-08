@@ -129,11 +129,17 @@ def register_sprzedaz(app):
 
         db = get_db()
 
-        # Stan magazynu
-        mag = db.execute(
-            "SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s"
-            " FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-        stan = max(0, int(mag["p"]) - int(mag["s"]))
+        # Stan magazynu — zebrane minus wszystkie transakcje minus straty
+        zebrane_tot = int(db.execute(
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=?",
+            (g,)).fetchone()["s"])
+        sprzedane_tot = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=?",
+            (g,)).fetchone()["s"])
+        straty_tot_s = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?",
+            (g,)).fetchone()["s"])
+        stan = max(0, zebrane_tot - sprzedane_tot - straty_tot_s)
         rez = db.execute(
             "SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia"
             " WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
