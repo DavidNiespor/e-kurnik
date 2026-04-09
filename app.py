@@ -960,16 +960,16 @@ def dashboard():
 
     if _pokaz("pokaz_sprzedaz_form"):
         _kl_opts = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + "</option>" for k in klienci)
+        _zam_opts = "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + " · " + (z["kn"] or "?") + " · " + str(z["ilosc"]) + " szt.</option>" for z in zamow_aktywne)
         html += (
-            "<div class='card' style='margin-bottom:0'>"
+            "<div class='card' style='margin-bottom:8px'>"
             "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
             "<b>Szybka sprzedaż</b>"
             "<a href='/sprzedaz' class='btn bo bsm'>Historia</a>"
             "</div>"
             "<form method='POST' action='/sprzedaz'>"
             "<input type='hidden' name='data' value='" + date.today().isoformat() + "'>"
-            "<input type='hidden' name='typ_sprzedazy' value='gotowka'>"
-            "<input type='hidden' name='zamowienie_id' value=''>"
+            # Wiersz 1: szt + cena + wartosc
             "<div style='display:flex;justify-content:space-between;align-items:center;"
             "padding:7px 10px;background:#f5f5f0;border-radius:8px;margin-bottom:6px'>"
             "<div style='display:flex;align-items:center;gap:10px'>"
@@ -977,22 +977,40 @@ def dashboard():
             "<input name='jaja_sprzedane' type='number' min='0' value='0' id='sp_d' oninput='cWd()'"
             " style='font-size:18px;text-align:center;width:72px'></div>"
             "<div><label style='font-size:11px;color:#888;display:block'>Cena/szt</label>"
-            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs('cena_jajka','1.20') + "' id='cn_d' oninput='cWd()'"
+            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs("cena_jajka","1.20") + "' id='cn_d' oninput='cWd()'"
             " style='font-size:18px;text-align:center;width:72px'></div>"
             "</div>"
             "<div style='text-align:right'>"
             "<div style='font-size:11px;color:#888'>Wartość</div>"
             "<b id='wrd' style='font-size:15px'>0.00 zł</b>"
             "</div></div>"
+            # Wiersz 2: klient + platnosc
             "<div style='display:flex;gap:6px;margin-bottom:6px'>"
-            "<select name='klient_id' style='flex:1;font-size:13px'>"
-            "<option value=''>— anonimowa —</option>" + _kl_opts +
-            "</select>"
-            "<button class='btn bp' style='white-space:nowrap;padding:8px 14px'>Zapisz</button>"
-            "</div>"
-            "<script>function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,"
+            "<select name='klient_id' id='kl_d' style='flex:2;font-size:13px'>"
+            "<option value=''>— anonimowa —</option>" + _kl_opts + "</select>"
+            "<select name='typ_sprzedazy' style='flex:1;font-size:13px'>"
+            "<option value='gotowka'>Gotówka</option>"
+            "<option value='przelew'>Przelew</option>"
+            "<option value='nastepnym_razem'>Następnym razem</option>"
+            "<option value='z_salda'>Z salda</option>"
+            "</select></div>"
+            # Wiersz 3: zamowienie (jesli sa aktywne)
+            + ("<div style='margin-bottom:6px'>"
+               "<select name='zamowienie_id' style='width:100%;font-size:13px'>"
+               "<option value=''>— bez zamówienia —</option>" + _zam_opts + "</select></div>"
+               if zamow_aktywne else "<input type='hidden' name='zamowienie_id' value=''>") +
+            # Wiersz 4: przycisk
+            "<button class='btn bp' style='width:100%;padding:9px;font-size:13px'>Zapisz sprzedaż</button>"
+            "<script>"
+            "var _kc=" + str({str(k["id"]): float(k["cena_indyw"] or 0) for k in klienci}).replace("'","\"") + ";"
+            "function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,"
             "c=parseFloat(document.getElementById('cn_d').value)||0;"
-            "document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zł';}cWd();</script>"
+            "document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zł';}"
+            "document.getElementById('kl_d').addEventListener('change',function(){"
+            "var ci=_kc[this.value]||0;"
+            "if(ci>0){document.getElementById('cn_d').value=ci.toFixed(2);cWd();}"
+            "else fetch('/api/klient-cena/'+this.value).then(r=>r.json()).then(d=>{document.getElementById('cn_d').value=d.cena;cWd();});"
+            "});cWd();</script>"
             "</form></div>"
         )
 
