@@ -1378,16 +1378,42 @@ def zamowienie_status(zid, status):
         db.execute("UPDATE zamowienia SET status=? WHERE id=?", (status, zid))
         if status == "dostarczone":
             td = date.today().isoformat()
-            if db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,td)).fetchone():
-                db.execute("UPDATE produkcja SET jaja_sprzedane=jaja_sprzedane+?,cena_sprzedazy=? WHERE gospodarstwo_id=? AND data=?",
-                           (row["ilosc"], row["cena_za_szt"], g, td))
+            ilosc = row["ilosc"]
+            cena  = float(row["cena_za_szt"] or 0)
+            kwota = round(ilosc * cena, 2)
+            kid   = row["klient_id"]
+            # Zapisz do sprzedaz_szczegol
+            db.execute(
+                "INSERT INTO sprzedaz_szczegol(gospodarstwo_id,data,klient_id,zamowienie_id,ilosc,cena_szt,wartosc,typ,uwagi)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (g, td, kid, zid, ilosc, cena, kwota, "nastepnym_razem" if kid else "gotowka", "Zamowienie #" + str(zid)))
+            # Aktualizuj sumy w produkcja
+            ex = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,td)).fetchone()
+            if ex:
+                db.execute(
+                    "UPDATE produkcja SET jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?) WHERE id=?",
+                    (g, td, ex["id"]))
             else:
                 db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg) VALUES(?,?,0,?,?,0)",
-                           (g, td, row["ilosc"], row["cena_za_szt"]))
+                           (g, td, ilosc, cena))
+            # Jesli klient - dodaj dług na saldo
+            if kid and kwota > 0:
+                ks = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+                stare = float(ks["saldo_pln"] if ks else 0)
+                nowe  = round(stare + kwota, 2)
+                if ks:
+                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe, kid))
+                else:
+                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe))
+                db.execute(
+                    "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
+                    (g, kid, "sprzedaz", kwota, str(ilosc) + " szt. zamowienie #" + str(zid), nowe))
+            flash("Dostarczone: " + str(ilosc) + " szt. = " + str(kwota) + " zl — wpisano do sprzedazy")
+        else:
+            flash("Status: " + status)
         db.commit()
     db.close()
-    flash("Status: " + status)
-    return redirect("/zamowienia")
+    return redirect(request.referrer or "/zamowienia")
 
 # Klienci przeniesione do produkcja_views.py
 
