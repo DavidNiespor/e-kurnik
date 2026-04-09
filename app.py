@@ -860,36 +860,15 @@ def dashboard():
     _data_str = f'{_dni_pl[_dzisiaj.weekday()]}, {_dzisiaj.day} {_mies_pl[_dzisiaj.month-1]} {_dzisiaj.year}'
 
 
-    # Formularz "Zebrane jaja" — mini historia + wybór daty
     _ostatnie_html = ""
     for _r in ostatnie:
         _ostatnie_html += (
-            "<div style='background:#f5f5f0;border-radius:6px;padding:3px 8px;font-size:11px;white-space:nowrap'>"
-            "<span style='color:#888'>" + _r["data"][5:] + "</span> "
-            "<b>" + str(_r["jaja_zebrane"]) + "</b>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;"
+            "padding:4px 10px;border-radius:6px'>"
+            "<div style='font-size:12px;color:#888'>" + _r["data"][5:] + "</div>"
+            "<b style='font-size:13px'>" + str(_r["jaja_zebrane"]) + " szt.</b>"
             "</div>"
         )
-    _jaja_form = (
-        "<div class='card' style='padding:10px'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
-        "<b style='font-size:13px'>🥚 Zebrane jaja</b>"
-        + ("<span style='font-size:11px;color:#3B6D11;font-weight:500'>" + str(dzis["jaja_zebrane"]) + " szt.</span>"
-           if dzis else "<span style='font-size:11px;color:#aaa'>—</span>")
-        + "</div>"
-        + ("<div style='display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px'>" + _ostatnie_html + "</div>"
-           if _ostatnie_html else "")
-        + "<form method='POST' action='/produkcja/dodaj'>"
-        + "<div style='display:flex;gap:6px;align-items:flex-end'>"
-        + "<div style='flex:1'><label style='font-size:11px'>Szt.</label>"
-        + "<input name='jaja_zebrane' type='number' min='0' value='"
-        + (str(dzis["jaja_zebrane"]) if dzis else "")
-        + "' style='font-size:16px;text-align:center;padding:6px' required></div>"
-        + "<div><label style='font-size:11px'>Data</label>"
-        + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:12px;padding:6px'></div>"
-        + "</div>"
-        + "<button class='btn bg' style='width:100%;margin-top:8px;padding:8px;font-size:13px'>Zapisz</button>"
-        + "</form></div>"
-    )
 
     html = (
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
