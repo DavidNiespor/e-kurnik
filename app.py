@@ -730,17 +730,19 @@ def dashboard():
     kur = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'", (g,)).fetchone()["s"] or 50
     prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as s, AVG(jaja_zebrane) as a FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-7 days')", (g,)).fetchone()
     nies = round((prod["a"] or 0)/kur*100,1) if kur else 0
-    mag_prod = db.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
+    from db import stan_magazynu as _sm
+    mag_stan = _sm(db, g)
     zarez = db.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
-    mag_stan = max(0, mag_prod["p"] - mag_prod["s"])
-    zysk = db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
+    _z1 = float(db.execute("SELECT COALESCE(SUM(wartosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"])
+    _z2 = float(db.execute("SELECT COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as s FROM produkcja WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now') AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)", (g,)).fetchone()["s"])
+    zysk = _z1 + _z2
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
-    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 7", (g,)).fetchall()
+    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? AND data < date('now') ORDER BY data DESC LIMIT 3", (g,)).fetchall()
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     zamow_aktywne = db.execute("""SELECT z.id,z.data_dostawy,z.ilosc,z.cena_za_szt,k.nazwa as kn FROM zamowienia z
         LEFT JOIN klienci k ON z.klient_id=k.id
         WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone')
@@ -775,6 +777,15 @@ def dashboard():
     prad_dzis  = float(db2.execute("SELECT COALESCE(SUM(kwh),0) as s FROM prad_odczyty WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     pasza_dzis = float(db2.execute("SELECT COALESCE(SUM(pasza_wydana_kg),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     db2.close()
+    db3 = get_db()
+    zebrane_7d = int(db3.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-7 days')", (g,)).fetchone()["s"])
+    sprzedane_mies_szt = int(db3.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"])
+    pasza_stan = 0.0
+    try: pasza_stan = float(db3.execute("SELECT COALESCE(SUM(stan),0) as s FROM stan_magazynu WHERE gospodarstwo_id=?", (g,)).fetchone()["s"] or 0)
+    except Exception: pass
+    pasza_dni = int(round(pasza_stan / float(gs("pasza_dzienna_kg","6")))) if float(gs("pasza_dzienna_kg","6")) > 0 and pasza_stan > 0 else 0
+    db3.close()
+    def _pokaz(k, d="1"): return gs(k, d) == "1"
 
     def _kaf_row(row):
         on  = bool(row["stan"])
@@ -849,87 +860,163 @@ def dashboard():
     _data_str = f'{_dni_pl[_dzisiaj.weekday()]}, {_dzisiaj.day} {_mies_pl[_dzisiaj.month-1]} {_dzisiaj.year}'
 
 
-    # Formularz "Zebrane jaja" — mini historia + wybór daty
     _ostatnie_html = ""
     for _r in ostatnie:
         _ostatnie_html += (
-            "<div style='background:#f5f5f0;border-radius:6px;padding:3px 8px;font-size:11px;white-space:nowrap'>"
-            "<span style='color:#888'>" + _r["data"][5:] + "</span> "
-            "<b>" + str(_r["jaja_zebrane"]) + "</b>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;"
+            "padding:4px 10px;border-radius:6px'>"
+            "<div style='font-size:12px;color:#888'>" + _r["data"][5:] + "</div>"
+            "<b style='font-size:13px'>" + str(_r["jaja_zebrane"]) + " szt.</b>"
             "</div>"
         )
-    _jaja_form = (
-        "<div class='card' style='padding:10px'>"
-        "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
-        "<b style='font-size:13px'>🥚 Zebrane jaja</b>"
-        + ("<span style='font-size:11px;color:#3B6D11;font-weight:500'>" + str(dzis["jaja_zebrane"]) + " szt.</span>"
-           if dzis else "<span style='font-size:11px;color:#aaa'>—</span>")
-        + "</div>"
-        + ("<div style='display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px'>" + _ostatnie_html + "</div>"
-           if _ostatnie_html else "")
-        + "<form method='POST' action='/produkcja/dodaj'>"
-        + "<div style='display:flex;gap:6px;align-items:flex-end'>"
-        + "<div style='flex:1'><label style='font-size:11px'>Szt.</label>"
-        + "<input name='jaja_zebrane' type='number' min='0' value='"
-        + (str(dzis["jaja_zebrane"]) if dzis else "")
-        + "' style='font-size:16px;text-align:center;padding:6px' required></div>"
-        + "<div><label style='font-size:11px'>Data</label>"
-        + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:12px;padding:6px'></div>"
-        + "</div>"
-        + "<button class='btn bg' style='width:100%;margin-top:8px;padding:8px;font-size:13px'>Zapisz</button>"
-        + "</form></div>"
-    )
 
     html = (
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
         '<h1 style="margin-bottom:0">Dashboard</h1>'
-        '<span style="font-size:14px;color:#5f5e5a;font-weight:500">' + _data_str + '</span>'
+        '<span style="font-size:13px;color:#5f5e5a">' + _data_str + '</span>'
         '</div>'
         + al_html
-        + '<div class="g4" style="margin-bottom:10px">'
-        '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7 dni</div><div class="s">' + str(kur) + ' niosek</div></div>'
-        '<div class="card stat"><div class="v">' + str(mag_stan) + '</div><div class="l">Jaj w magazynie</div><div class="s">zarezerwowane: ' + str(zarez) + '</div></div>'
-        '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,0)) + ' zł</div><div class="l">Przychód miesiąc</div><div class="s">wydatki: ' + str(round(wyd,0)) + ' zł</div></div>'
-        '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
-        '</div>'
-        + (sterowanie_html if _pokaz_ster else "")
-        + _kafelki_czynnosci(g)
-        + '<div class="g2">'
-
-        # Formularz 1: Zebrane jaja
-        + _jaja_form
-
-        # Formularz 2: Szybka sprzedaż → /sprzedaz (z zamówieniami)
-        + (lambda: (
-            '<div class="card"><b>Sprzedaż — dziś</b>'
-            '<form method="POST" action="/sprzedaz" style="margin-top:10px">'
-            '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-            '<label>Sprzedane (szt)</label>'
-            '<input name="jaja_sprzedane" type="number" min="0" value="0" id="sp_d" oninput="cWd()" style="font-size:18px;text-align:center">'
-            '<label>Cena/szt (zł)</label>'
-            '<input name="cena_sprzedazy" type="number" step="0.01" value="' + gs('cena_jajka','1.20') + '" id="cn_d" oninput="cWd()">'
-            '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
-            '<label>Klient</label>'
-            '<select name="klient_id"><option value="">— anonimowa —</option>'
-            + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
-            + '</select>'
-            '<label>Typ płatności</label>'
-            '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="nastepnym_razem">Następnym razem</option><option value="z_salda">Z salda</option></select>'
-            '<label>Zamówienie</label>'
-            '<select name="zamowienie_id"><option value="">— bez zamówienia —</option>'
-            + "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + ' · ' + (z["kn"] or "?") + ' · ' + str(z["ilosc"]) + ' szt.</option>' for z in zamow_aktywne)
-            + '</select>'
-            + ('<div style="background:#fff3cd;border-radius:6px;padding:6px 10px;font-size:12px;margin:4px 0">📦 '
-               + str(len(zamow_aktywne)) + ' zamówień do realizacji'
-               + (' — <b>dziś: ' + str(sum(1 for z in zamow_aktywne if z["data_dostawy"] <= date.today().isoformat())) + '</b>' if any(z["data_dostawy"] <= date.today().isoformat() for z in zamow_aktywne) else "")
-               + '</div>' if zamow_aktywne else "")
-            + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:11px">Zapisz sprzedaż</button>'
-            '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
-            '</form></div>'
-        ))()
-
-        # Pasza i woda wbudowane w czynnosci
+        + '<style>.dg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}'
+        '@media(max-width:480px){.dg{grid-template-columns:repeat(2,1fr)}}</style>'
+        + '<div class="dg">'
+        + '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7d</div><div class="s">' + str(kur) + ' niosek</div></div>'
+        + '<div class="card stat"><div class="v">' + str(zebrane_7d) + '</div><div class="l">Zebrane 7d</div><div class="s">szt.</div></div>'
+        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(sprzedane_mies_szt) + '</div><div class="l">Sprzedane mies.</div><div class="s">szt.</div></div>'
+        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,2)) + ' zł</div><div class="l">Zarobek mies.</div><div class="s">wyd: ' + str(round(float(wyd),0)) + ' zł</div></div>'
+        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan > 0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">rez. ' + str(int(zarez)) + '</div></div>'
+        + ('<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if pasza_dni > 0 and pasza_dni < 7 else '#BA7517' if pasza_dni < 14 else '#3B6D11') + '">' + str(pasza_dni) + 'd</div><div class="l">Pasza zostanie</div><div class="s">' + str(round(pasza_stan,1)) + ' kg</div></div>' if pasza_stan > 0 else '')
+        + '</div>'
+        + (sterowanie_html if _pokaz("pokaz_sterowanie") else "")
+        + (_kafelki_czynnosci(g) if _pokaz("pokaz_czynnosci") else "")
     )
+    # Zamowienia
+    if _pokaz("pokaz_zamowienia"):
+        _zam_rows = ""
+        for z in zamow_aktywne:
+            _alarm = " dzis!" if z["data_dostawy"] == date.today().isoformat() else " zaglegle!" if z["data_dostawy"] < date.today().isoformat() else " za " + str((date.fromisoformat(z["data_dostawy"]) - date.today()).days) + " dni"
+            _bg = "background:#fff3cd;" if z["data_dostawy"] <= date.today().isoformat() else "background:#f5f5f0;"
+            _zam_rows += (
+                "<div style='display:flex;justify-content:space-between;align-items:center;"
+                "padding:7px 10px;border-radius:8px;margin-bottom:5px;" + _bg + "'>"
+                "<div>"
+                "<div style='font-weight:600;font-size:13px'>" + (z["kn"] or "—") + "</div>"
+                "<div style='font-size:11px;color:#888'>" + z["data_dostawy"] + _alarm + "</div>"
+                "</div>"
+                "<div style='display:flex;align-items:center;gap:8px'>"
+                "<div style='text-align:right'>"
+                "<b style='font-size:15px'>" + str(z["ilosc"]) + " szt.</b>"
+                "<div style='font-size:11px;color:#3B6D11'>" + str(round(z["ilosc"]*(z["cena_za_szt"] or 0),2)) + " zl</div>"
+                "</div>"
+                "<a href='/zamowienia/" + str(z["id"]) + "/status/dostarczone' class='btn bg bsm'>✓</a>"
+                "</div></div>"
+            )
+        html += (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Zamowienia</b>"
+            "<div style='display:flex;gap:6px'>"
+            "<a href='/zamowienia/dodaj' class='btn bp bsm'>+ Nowe</a>"
+            "<a href='/zamowienia' class='btn bo bsm'>Wszystkie</a>"
+            "</div></div>"
+            + (_zam_rows or "<p style='color:#888;font-size:12px;text-align:center'>Brak zamowien</p>")
+            + "</div>"
+        )
+    # Formularz zebranych + szybka sprzedaz
+    html += '<div style="margin-bottom:10px">'
+
+    if _pokaz("pokaz_jaja_form"):
+        # Max 3 ostatnie wpisy - zwarte jak zamowienia
+        _hist_html = ""
+        for _r in ostatnie:
+            _hist_html += (
+                "<div style='display:flex;justify-content:space-between;align-items:center;"
+                "padding:5px 10px;background:#f5f5f0;border-radius:7px;margin-bottom:4px'>"
+                "<span style='font-size:12px;color:#888'>" + _r["data"] + "</span>"
+                "<b style='font-size:13px'>" + str(_r["jaja_zebrane"]) + " szt.</b>"
+                "</div>"
+            )
+        html += (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Zebrane jaja</b>"
+            "<a href='/magazyn-jaj' class='btn bo bsm'>Magazyn</a>"
+            "</div>"
+            "<form method='POST' action='/produkcja/dodaj'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;"
+            "padding:7px 10px;background:#EAF3DE;border-radius:8px;margin-bottom:6px'>"
+            "<div>"
+            "<div style='font-weight:600;font-size:13px'>Dzisiaj</div>"
+            "<div style='font-size:11px;color:#888'>" + date.today().strftime("%d.%m.%Y") + "</div>"
+            "</div>"
+            "<div style='display:flex;align-items:center;gap:8px'>"
+            "<input name='jaja_zebrane' type='number' min='0' value='" + (str(dzis["jaja_zebrane"]) if dzis else "") + "'"
+            " placeholder='0' style='font-size:18px;text-align:center;width:72px;padding:4px' required>"
+            "<input name='data' type='hidden' value='" + date.today().isoformat() + "'>"
+            "<button class='btn bg bsm' style='white-space:nowrap'>✓ Zapisz</button>"
+            "</div></div>"
+            + _hist_html
+            + "</form></div>"
+        )
+
+    if _pokaz("pokaz_sprzedaz_form"):
+        _kl_opts = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + "</option>" for k in klienci)
+        _zam_opts = "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + " · " + (z["kn"] or "?") + " · " + str(z["ilosc"]) + " szt.</option>" for z in zamow_aktywne)
+        html += (
+            "<div class='card' style='margin-bottom:8px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Szybka sprzedaż</b>"
+            "<a href='/sprzedaz' class='btn bo bsm'>Historia</a>"
+            "</div>"
+            "<form method='POST' action='/sprzedaz'>"
+            "<input type='hidden' name='data' value='" + date.today().isoformat() + "'>"
+            # Wiersz 1: szt + cena + wartosc
+            "<div style='display:flex;justify-content:space-between;align-items:center;"
+            "padding:7px 10px;background:#f5f5f0;border-radius:8px;margin-bottom:6px'>"
+            "<div style='display:flex;align-items:center;gap:10px'>"
+            "<div><label style='font-size:11px;color:#888;display:block'>Szt.</label>"
+            "<input name='jaja_sprzedane' type='number' min='0' value='0' id='sp_d' oninput='cWd()'"
+            " style='font-size:18px;text-align:center;width:72px'></div>"
+            "<div><label style='font-size:11px;color:#888;display:block'>Cena/szt</label>"
+            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs("cena_jajka","1.20") + "' id='cn_d' oninput='cWd()'"
+            " style='font-size:18px;text-align:center;width:72px'></div>"
+            "</div>"
+            "<div style='text-align:right'>"
+            "<div style='font-size:11px;color:#888'>Wartość</div>"
+            "<b id='wrd' style='font-size:15px'>0.00 zł</b>"
+            "</div></div>"
+            # Wiersz 2: klient + platnosc
+            "<div style='display:flex;gap:6px;margin-bottom:6px'>"
+            "<select name='klient_id' id='kl_d' style='flex:2;font-size:13px'>"
+            "<option value=''>— anonimowa —</option>" + _kl_opts + "</select>"
+            "<select name='typ_sprzedazy' style='flex:1;font-size:13px'>"
+            "<option value='gotowka'>Gotówka</option>"
+            "<option value='przelew'>Przelew</option>"
+            "<option value='nastepnym_razem'>Następnym razem</option>"
+            "<option value='z_salda'>Z salda</option>"
+            "</select></div>"
+            # Wiersz 3: zamowienie (jesli sa aktywne)
+            + ("<div style='margin-bottom:6px'>"
+               "<select name='zamowienie_id' style='width:100%;font-size:13px'>"
+               "<option value=''>— bez zamówienia —</option>" + _zam_opts + "</select></div>"
+               if zamow_aktywne else "<input type='hidden' name='zamowienie_id' value=''>") +
+            # Wiersz 4: przycisk
+            "<button class='btn bp' style='width:100%;padding:9px;font-size:13px'>Zapisz sprzedaż</button>"
+            "<script>"
+            "var _kc=" + str({str(k["id"]): float(k["cena_indyw"] or 0) for k in klienci}).replace("'","\"") + ";"
+            "function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,"
+            "c=parseFloat(document.getElementById('cn_d').value)||0;"
+            "document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zł';}"
+            "document.getElementById('kl_d').addEventListener('change',function(){"
+            "var ci=_kc[this.value]||0;"
+            "if(ci>0){document.getElementById('cn_d').value=ci.toFixed(2);cWd();}"
+            "else fetch('/api/klient-cena/'+this.value).then(r=>r.json()).then(d=>{document.getElementById('cn_d').value=d.cena;cWd();});"
+            "});cWd();</script>"
+            "</form></div>"
+        )
+
+    html += '</div>'
+    html += '</div>'
+
     return R(html, "dash")
 
 
@@ -1230,7 +1317,8 @@ def zamowienia():
         '<td><span class="badge ' + sbdg.get(r["status"],"b-gray") + '">' + r["status"] + '</span></td>'
         '<td class="nowrap">'
         '<a href="/zamowienia/' + str(r["id"]) + '/status/dostarczone" class="btn bg bsm">Dostarczone</a> '
-        '<a href="/zamowienia/' + str(r["id"]) + '/status/anulowane" class="btn br bsm">✕</a>'
+        '<a href="/zamowienia/' + str(r["id"]) + '/edytuj" class="btn bo bsm">Edytuj</a> '
+        '<a href="/zamowienia/' + str(r["id"]) + '/usun" class="btn br bsm" onclick="return confirm(\'Usunac?\')">✕</a>'
         '</td></tr>'
         for r in rows
     )
@@ -1246,6 +1334,64 @@ def zamowienia():
     )
     return R(html, "zam")
 
+@app.route("/zamowienia/<int:zid>/usun")
+@farm_required
+def zamowienie_usun(zid):
+    g = gid(); db = get_db()
+    db.execute("DELETE FROM sprzedaz_szczegol WHERE zamowienie_id=? AND gospodarstwo_id=?", (zid, g))
+    db.execute("DELETE FROM zamowienia WHERE id=? AND gospodarstwo_id=?", (zid, g))
+    db.commit(); db.close()
+    flash("Zamowienie usuniete.")
+    return redirect(request.referrer or "/zamowienia")
+
+
+@app.route("/zamowienia/<int:zid>/edytuj", methods=["GET","POST"])
+@farm_required
+def zamowienie_edytuj(zid):
+    g = gid(); db = get_db()
+    row = db.execute("SELECT * FROM zamowienia WHERE id=? AND gospodarstwo_id=?", (zid,g)).fetchone()
+    if not row: db.close(); return redirect("/zamowienia")
+    if request.method == "POST":
+        db.execute(
+            "UPDATE zamowienia SET klient_id=?,data_dostawy=?,ilosc=?,cena_za_szt=?,uwagi=?,status=? WHERE id=? AND gospodarstwo_id=?",
+            (request.form.get("klient_id") or None,
+             request.form.get("data_dostawy"),
+             int(request.form.get("ilosc") or 0),
+             float(request.form.get("cena_za_szt") or 0),
+             request.form.get("uwagi",""),
+             request.form.get("status","nowe"),
+             zid, g))
+        db.commit(); db.close()
+        flash("Zamowienie zaktualizowane.")
+        return redirect("/zamowienia")
+    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    db.close()
+    opt = "".join(
+        '<option value="' + str(k["id"]) + '"' + (' selected' if row["klient_id"]==k["id"] else '') + '>' + k["nazwa"] + '</option>'
+        for k in klienci)
+    stat_opt = "".join(
+        '<option value="' + s + '"' + (' selected' if row["status"]==s else '') + '>' + s + '</option>'
+        for s in ["nowe","potwierdzone","dostarczone","anulowane"])
+    html = (
+        '<h1>Edycja zamowienia #' + str(zid) + '</h1><div class="card"><form method="POST">'
+        '<label>Klient</label>'
+        '<select name="klient_id"><option value="">— wybierz —</option>' + opt + '</select>'
+        '<div class="g2">'
+        '<div><label>Data dostawy</label><input name="data_dostawy" type="date" value="' + (row["data_dostawy"] or "") + '"></div>'
+        '<div><label>Ilosc jaj</label><input name="ilosc" type="number" min="1" value="' + str(row["ilosc"]) + '"></div>'
+        '</div>'
+        '<div class="g2">'
+        '<div><label>Cena/szt (zl)</label><input name="cena_za_szt" type="number" step="0.01" value="' + str(row["cena_za_szt"] or "") + '"></div>'
+        '<div><label>Status</label><select name="status">' + stat_opt + '</select></div>'
+        '</div>'
+        '<label>Uwagi</label><input name="uwagi" value="' + (row["uwagi"] or "") + '">'
+        '<br><button class="btn bp">Zapisz</button>'
+        '<a href="/zamowienia" class="btn bo" style="margin-left:8px">Anuluj</a>'
+        '</form></div>'
+    )
+    return R(html, "zam")
+
+
 @app.route("/zamowienia/dodaj", methods=["GET","POST"])
 @farm_required
 def zamowienia_dodaj():
@@ -1260,7 +1406,7 @@ def zamowienia_dodaj():
         flash("Zamówienie dodane.")
         return redirect("/zamowienia")
     db = get_db()
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     db.close()
     opt = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
     html = (
@@ -1291,16 +1437,42 @@ def zamowienie_status(zid, status):
         db.execute("UPDATE zamowienia SET status=? WHERE id=?", (status, zid))
         if status == "dostarczone":
             td = date.today().isoformat()
-            if db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,td)).fetchone():
-                db.execute("UPDATE produkcja SET jaja_sprzedane=jaja_sprzedane+?,cena_sprzedazy=? WHERE gospodarstwo_id=? AND data=?",
-                           (row["ilosc"], row["cena_za_szt"], g, td))
+            ilosc = row["ilosc"]
+            cena  = float(row["cena_za_szt"] or 0)
+            kwota = round(ilosc * cena, 2)
+            kid   = row["klient_id"]
+            # Zapisz do sprzedaz_szczegol
+            db.execute(
+                "INSERT INTO sprzedaz_szczegol(gospodarstwo_id,data,klient_id,zamowienie_id,ilosc,cena_szt,wartosc,typ,uwagi)"
+                " VALUES(?,?,?,?,?,?,?,?,?)",
+                (g, td, kid, zid, ilosc, cena, kwota, "nastepnym_razem" if kid else "gotowka", "Zamowienie #" + str(zid)))
+            # Aktualizuj sumy w produkcja
+            ex = db.execute("SELECT id FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g,td)).fetchone()
+            if ex:
+                db.execute(
+                    "UPDATE produkcja SET jaja_sprzedane=(SELECT COALESCE(SUM(ilosc),0) FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data=?) WHERE id=?",
+                    (g, td, ex["id"]))
             else:
                 db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,cena_sprzedazy,pasza_wydana_kg) VALUES(?,?,0,?,?,0)",
-                           (g, td, row["ilosc"], row["cena_za_szt"]))
+                           (g, td, ilosc, cena))
+            # Jesli klient - dodaj dług na saldo
+            if kid and kwota > 0:
+                ks = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+                stare = float(ks["saldo_pln"] if ks else 0)
+                nowe  = round(stare + kwota, 2)
+                if ks:
+                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe, kid))
+                else:
+                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe))
+                db.execute(
+                    "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
+                    (g, kid, "sprzedaz", kwota, str(ilosc) + " szt. zamowienie #" + str(zid), nowe))
+            flash("Dostarczone: " + str(ilosc) + " szt. = " + str(kwota) + " zl — wpisano do sprzedazy")
+        else:
+            flash("Status: " + status)
         db.commit()
     db.close()
-    flash("Status: " + status)
-    return redirect("/zamowienia")
+    return redirect(request.referrer or "/zamowienia")
 
 # Klienci przeniesione do produkcja_views.py
 
