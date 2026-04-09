@@ -58,7 +58,30 @@ def register_produkcja(app):
                     flash(str(ile) + " jaj za darmo: " + powod)
                 db.close(); return redirect("/magazyn-jaj")
 
-            # Domyślnie: zapis zebranych jaj
+            if action == "korekta":
+                ile   = int(request.form.get("korekta_ile", 0) or 0)
+                opis  = request.form.get("korekta_opis", "korekta reczna").strip() or "korekta reczna"
+                data_k = request.form.get("korekta_data", date.today().isoformat())
+                if ile > 0:
+                    # Korekta na plus — dodaj do zebranych
+                    ex_k = db.execute("SELECT id,jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? AND data=?", (g, data_k)).fetchone()
+                    if ex_k:
+                        db.execute("UPDATE produkcja SET jaja_zebrane=jaja_zebrane+?,uwagi=? WHERE id=?",
+                                   (ile, opis, ex_k["id"]))
+                    else:
+                        db.execute("INSERT INTO produkcja(gospodarstwo_id,data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg,uwagi) VALUES(?,?,?,0,0,?)",
+                                   (g, data_k, ile, opis))
+                    db.commit()
+                    flash("Korekta +{} szt.: {}".format(ile, opis))
+                elif ile < 0:
+                    # Korekta na minus — dodaj stratę
+                    db.execute("INSERT INTO jaja_straty(gospodarstwo_id,data,ilosc,powod) VALUES(?,?,?,?)",
+                               (g, data_k, abs(ile), opis))
+                    db.commit()
+                    flash("Korekta {} szt.: {}".format(ile, opis))
+                db.close(); return redirect("/magazyn-jaj")
+
+
             d     = request.form.get("data", date.today().isoformat())
             jaja  = int(request.form.get("jaja_zebrane", 0) or 0)
             uwagi = request.form.get("uwagi", "")
@@ -143,7 +166,8 @@ def register_produkcja(app):
             "<div class='card stat'>"
             "<div class='v' style='color:#3B6D11'>" + str(stan_mag) + "</div>"
             "<div class='l'>W magazynie</div>"
-            "<div class='s'>dostepne: " + str(dostepne) + " szt.</div>"
+            "<div class='s' style='color:#888'>zarezerwowane: " + str(rez) + " szt.</div>"
+            "<div class='s' style='color:" + ('#3B6D11' if dostepne > 0 else '#A32D2D') + ";font-weight:600'>dostepne: " + str(dostepne) + " szt.</div>"
             "</div>"
             "<div class='card stat'>"
             "<div class='v'>" + str(int(stat["sum_zeb"])) + "</div>"
@@ -309,11 +333,33 @@ def register_produkcja(app):
             + "</tbody></table></div></div>"
         )
 
+        s_korekta = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Korekta stanu magazynu</b>"
+            "<span style='font-size:11px;color:#888'>np. błąd liczenia, korekta historyczna</span>"
+            "</div>"
+            "<form method='POST' action='/magazyn-jaj'>"
+            "<input type='hidden' name='action' value='korekta'>"
+            "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+            "<div><label style='font-size:11px;color:#888'>Ilość (+ dodaj / - odejmij)</label>"
+            "<input name='korekta_ile' type='number' placeholder='np. 20 lub -15'"
+            " style='font-size:16px;text-align:center;width:130px'></div>"
+            "<div style='flex:2;min-width:150px'><label style='font-size:11px;color:#888'>Opis</label>"
+            "<input name='korekta_opis' placeholder='np. korekta po inwentaryzacji'></div>"
+            "<div><label style='font-size:11px;color:#888'>Data</label>"
+            "<input name='korekta_data' type='date' value='" + date.today().isoformat() + "'"
+            " style='font-size:13px'></div>"
+            "<button class='btn bo bsm' style='align-self:flex-end;padding:9px 16px'>Zastosuj korektę</button>"
+            "</div></form></div>"
+        )
+
         html = (
             "<h1>Magazyn jaj</h1>"
             + s_stats
             + s_wpis
             + s_strata
+            + s_korekta
             + s_straty_hist
             + s_historia
         )

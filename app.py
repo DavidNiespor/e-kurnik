@@ -883,7 +883,7 @@ def dashboard():
         + '<div class="card stat"><div class="v">' + str(zebrane_7d) + '</div><div class="l">Zebrane 7d</div><div class="s">szt.</div></div>'
         + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(sprzedane_mies_szt) + '</div><div class="l">Sprzedane mies.</div><div class="s">szt.</div></div>'
         + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,2)) + ' zł</div><div class="l">Zarobek mies.</div><div class="s">wyd: ' + str(round(float(wyd),0)) + ' zł</div></div>'
-        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan > 0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">rez. ' + str(int(zarez)) + '</div></div>'
+        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan > 0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">rez. ' + str(int(zarez)) + ' szt.</div><div class="s" style="color:' + ('#3B6D11' if mag_stan-int(zarez) > 0 else '#A32D2D') + ';font-weight:600">dost. ' + str(max(0,mag_stan-int(zarez))) + ' szt.</div></div>'
         + ('<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if pasza_dni > 0 and pasza_dni < 7 else '#BA7517' if pasza_dni < 14 else '#3B6D11') + '">' + str(pasza_dni) + 'd</div><div class="l">Pasza zostanie</div><div class="s">' + str(round(pasza_stan,1)) + ' kg</div></div>' if pasza_stan > 0 else '')
         + '</div>'
         + (sterowanie_html if _pokaz("pokaz_sterowanie") else "")
