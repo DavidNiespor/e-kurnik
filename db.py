@@ -313,6 +313,14 @@ def init_db():
         powod TEXT DEFAULT 'inne',
         uwagi TEXT DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS inwentaryzacje (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        data DATE NOT NULL,
+        stan INTEGER NOT NULL,
+        uwagi TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS sprzedaz_szczegol (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id),
@@ -392,31 +400,76 @@ def init_db():
 
 
 def stan_magazynu(db, gospodarstwo_id):
-    """Stan = zebrane - sprzedane (uwzglednia stare i nowe dane) - straty."""
-    zebrane = int(db.execute(
-        "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=?",
-        (gospodarstwo_id,)).fetchone()["s"])
-    sprzedane = int(db.execute("""
-        SELECT COALESCE(SUM(sprzedane_dzien),0) as s FROM (
-            SELECT MAX(
-                COALESCE((SELECT SUM(ilosc) FROM sprzedaz_szczegol ss
-                          WHERE ss.gospodarstwo_id=p.gospodarstwo_id AND ss.data=p.data),0),
-                COALESCE(p.jaja_sprzedane,0)
-            ) as sprzedane_dzien
-            FROM produkcja p WHERE p.gospodarstwo_id=?
-            UNION ALL
-            SELECT COALESCE(SUM(ilosc),0)
-            FROM sprzedaz_szczegol ss2 WHERE ss2.gospodarstwo_id=?
-              AND NOT EXISTS (SELECT 1 FROM produkcja p2
-                              WHERE p2.gospodarstwo_id=ss2.gospodarstwo_id AND p2.data=ss2.data)
-            GROUP BY ss2.data
-        )""", (gospodarstwo_id, gospodarstwo_id)).fetchone()["s"])
-    straty = 0
-    try:
-        straty = int(db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?",
-            (gospodarstwo_id,)).fetchone()["s"])
-    except Exception:
-        pass
-    return max(0, zebrane - sprzedane - straty)
+    """Stan = ostatnia inwentaryzacja + zebrane od niej - sprzedane od niej - straty od niej.
+    Jeśli brak inwentaryzacji, liczy od początku."""
+    g = gospodarstwo_id
+
+    # Sprawdz czy jest inwentaryzacja
+    last_inw = db.execute(
+        "SELECT data, stan FROM inwentaryzacje WHERE gospodarstwo_id=? ORDER BY data DESC, id DESC LIMIT 1",
+        (g,)).fetchone()
+
+    if last_inw:
+        # Liczymy od dnia inwentaryzacji (wyłącznie — stan jest już "bazą")
+        base_date = last_inw["data"]
+        base_stan = int(last_inw["stan"])
+
+        zebrane = int(db.execute(
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data>?",
+            (g, base_date)).fetchone()["s"])
+
+        sprzedane = int(db.execute("""
+            SELECT COALESCE(SUM(sprzedane_dzien),0) as s FROM (
+                SELECT MAX(
+                    COALESCE((SELECT SUM(ilosc) FROM sprzedaz_szczegol ss
+                              WHERE ss.gospodarstwo_id=p.gospodarstwo_id AND ss.data=p.data),0),
+                    COALESCE(p.jaja_sprzedane,0)
+                ) as sprzedane_dzien
+                FROM produkcja p WHERE p.gospodarstwo_id=? AND p.data>?
+                UNION ALL
+                SELECT COALESCE(SUM(ilosc),0)
+                FROM sprzedaz_szczegol ss2 WHERE ss2.gospodarstwo_id=? AND ss2.data>?
+                  AND NOT EXISTS (SELECT 1 FROM produkcja p2
+                                  WHERE p2.gospodarstwo_id=ss2.gospodarstwo_id AND p2.data=ss2.data)
+                GROUP BY ss2.data
+            )""", (g, base_date, g, base_date)).fetchone()["s"])
+
+        straty = 0
+        try:
+            straty = int(db.execute(
+                "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=? AND data>?",
+                (g, base_date)).fetchone()["s"])
+        except Exception:
+            pass
+
+        return max(0, base_stan + zebrane - sprzedane - straty)
+
+    else:
+        # Brak inwentaryzacji — liczymy od początku
+        zebrane = int(db.execute(
+            "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=?",
+            (g,)).fetchone()["s"])
+        sprzedane = int(db.execute("""
+            SELECT COALESCE(SUM(sprzedane_dzien),0) as s FROM (
+                SELECT MAX(
+                    COALESCE((SELECT SUM(ilosc) FROM sprzedaz_szczegol ss
+                              WHERE ss.gospodarstwo_id=p.gospodarstwo_id AND ss.data=p.data),0),
+                    COALESCE(p.jaja_sprzedane,0)
+                ) as sprzedane_dzien
+                FROM produkcja p WHERE p.gospodarstwo_id=?
+                UNION ALL
+                SELECT COALESCE(SUM(ilosc),0)
+                FROM sprzedaz_szczegol ss2 WHERE ss2.gospodarstwo_id=?
+                  AND NOT EXISTS (SELECT 1 FROM produkcja p2
+                                  WHERE p2.gospodarstwo_id=ss2.gospodarstwo_id AND p2.data=ss2.data)
+                GROUP BY ss2.data
+            )""", (g, g)).fetchone()["s"])
+        straty = 0
+        try:
+            straty = int(db.execute(
+                "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?",
+                (g,)).fetchone()["s"])
+        except Exception:
+            pass
+        return max(0, zebrane - sprzedane - straty)
 

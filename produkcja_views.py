@@ -58,7 +58,19 @@ def register_produkcja(app):
                     flash(str(ile) + " jaj za darmo: " + powod)
                 db.close(); return redirect("/magazyn-jaj")
 
-            if action == "korekta":
+            if action == "inwentaryzacja":
+                stan_inw = request.form.get("inw_stan", "")
+                uwagi_inw = request.form.get("inw_uwagi", "").strip()
+                data_inw  = request.form.get("inw_data", date.today().isoformat())
+                if stan_inw != "" and int(stan_inw) >= 0:
+                    db.execute(
+                        "INSERT INTO inwentaryzacje(gospodarstwo_id,data,stan,uwagi) VALUES(?,?,?,?)",
+                        (g, data_inw, int(stan_inw), uwagi_inw))
+                    db.commit()
+                    flash("Inwentaryzacja zapisana: {} szt. na dzień {}".format(stan_inw, data_inw))
+                db.close(); return redirect("/magazyn-jaj")
+
+
                 ile   = int(request.form.get("korekta_ile", 0) or 0)
                 opis  = request.form.get("korekta_opis", "korekta reczna").strip() or "korekta reczna"
                 data_k = request.form.get("korekta_data", date.today().isoformat())
@@ -154,6 +166,14 @@ def register_produkcja(app):
         ostatnie = db.execute(
             "SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=?"
             " ORDER BY data DESC LIMIT 7", (g,)).fetchall()
+
+        # Historia inwentaryzacji
+        try:
+            inw_hist = db.execute(
+                "SELECT * FROM inwentaryzacje WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 5",
+                (g,)).fetchall()
+        except Exception:
+            inw_hist = []
 
         db.close()
 
@@ -354,9 +374,45 @@ def register_produkcja(app):
             "</div></form></div>"
         )
 
+        last_inw = inw_hist[0] if inw_hist else None
+
+        s_inwentaryzacja = (
+            "<div class='card' style='margin-bottom:12px;border-left:4px solid #534AB7'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<div>"
+            "<b>Inwentaryzacja magazynu</b>"
+            "<div style='font-size:11px;color:#888;margin-top:2px'>Wpisz rzeczywisty stan — będzie podstawą liczenia od tej daty</div>"
+            "</div>"
+            + ("<span style='font-size:12px;color:#534AB7'>ostatnia: <b>" + last_inw["data"] + "</b> → " + str(last_inw["stan"]) + " szt.</span>" if last_inw else "")
+            + "</div>"
+            "<form method='POST' action='/magazyn-jaj'>"
+            "<input type='hidden' name='action' value='inwentaryzacja'>"
+            "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
+            "<div><label style='font-size:11px;color:#888'>Stan rzeczywisty (szt.)</label>"
+            "<input name='inw_stan' type='number' min='0' required placeholder='np. 93'"
+            " style='font-size:20px;text-align:center;width:120px;font-weight:700'></div>"
+            "<div><label style='font-size:11px;color:#888'>Data inwentaryzacji</label>"
+            "<input name='inw_data' type='date' value='" + date.today().isoformat() + "'"
+            " style='font-size:14px'></div>"
+            "<div style='flex:2;min-width:150px'><label style='font-size:11px;color:#888'>Uwagi</label>"
+            "<input name='inw_uwagi' placeholder='np. po przeliczeniu fizycznym'></div>"
+            "<button class='btn bp' style='padding:10px 20px;white-space:nowrap'>Zapisz inwentaryzację</button>"
+            "</div></form>"
+            + ("".join(
+                "<div style='display:flex;justify-content:space-between;padding:5px 0;"
+                "border-top:1px solid #f0ede4;font-size:13px'>"
+                "<span style='color:#888'>" + r["data"] + "</span>"
+                "<b>" + str(r["stan"]) + " szt.</b>"
+                "<span style='color:#aaa;font-size:11px'>" + (r["uwagi"] or "") + "</span>"
+                "</div>"
+                for r in inw_hist) if inw_hist else "")
+            + "</div>"
+        )
+
         html = (
             "<h1>Magazyn jaj</h1>"
             + s_stats
+            + s_inwentaryzacja
             + s_wpis
             + s_strata
             + s_korekta
