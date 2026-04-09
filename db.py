@@ -389,3 +389,34 @@ def init_db():
         try: db.execute(_col); db.commit()
         except: pass
     db.commit(); db.close()
+
+
+def stan_magazynu(db, gospodarstwo_id):
+    """Stan = zebrane - sprzedane (uwzglednia stare i nowe dane) - straty."""
+    zebrane = int(db.execute(
+        "SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=?",
+        (gospodarstwo_id,)).fetchone()["s"])
+    sprzedane = int(db.execute("""
+        SELECT COALESCE(SUM(sprzedane_dzien),0) as s FROM (
+            SELECT MAX(
+                COALESCE((SELECT SUM(ilosc) FROM sprzedaz_szczegol ss
+                          WHERE ss.gospodarstwo_id=p.gospodarstwo_id AND ss.data=p.data),0),
+                COALESCE(p.jaja_sprzedane,0)
+            ) as sprzedane_dzien
+            FROM produkcja p WHERE p.gospodarstwo_id=?
+            UNION ALL
+            SELECT COALESCE(SUM(ilosc),0)
+            FROM sprzedaz_szczegol ss2 WHERE ss2.gospodarstwo_id=?
+              AND NOT EXISTS (SELECT 1 FROM produkcja p2
+                              WHERE p2.gospodarstwo_id=ss2.gospodarstwo_id AND p2.data=ss2.data)
+            GROUP BY ss2.data
+        )""", (gospodarstwo_id, gospodarstwo_id)).fetchone()["s"])
+    straty = 0
+    try:
+        straty = int(db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty WHERE gospodarstwo_id=?",
+            (gospodarstwo_id,)).fetchone()["s"])
+    except Exception:
+        pass
+    return max(0, zebrane - sprzedane - straty)
+

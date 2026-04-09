@@ -130,10 +130,8 @@ def register_sprzedaz(app):
         db = get_db()
 
         # Stan magazynu
-        mag = db.execute(
-            "SELECT COALESCE(SUM(jaja_zebrane),0) as p, COALESCE(SUM(jaja_sprzedane),0) as s"
-            " FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-        stan = max(0, int(mag["p"]) - int(mag["s"]))
+        from db import stan_magazynu as _sm
+        stan = _sm(db, g)
         rez = db.execute(
             "SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia"
             " WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')", (g,)).fetchone()["s"]
@@ -158,25 +156,46 @@ def register_sprzedaz(app):
             WHERE s.gospodarstwo_id=? AND s.data >= ? AND s.data <= ?
             ORDER BY s.data DESC, s.id DESC""", (g, data_od, data_do)).fetchall()
 
-        # Statystyki w zakresie
-        stat_zakres = db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as szt,"
-            " COALESCE(SUM(wartosc),0) as przychod"
-            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
-            " AND data>=? AND data<=?",
+        # Statystyki w zakresie - uwzgledniaj stare dane (produkcja) i nowe (sprzedaz_szczegol)
+        # Dla dni bez sprzedaz_szczegol uzyj produkcja.jaja_sprzedane * cena_sprzedazy
+        _sz = db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as szt, COALESCE(SUM(wartosc),0) as przychod"
+            " FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data>=? AND data<=?",
             (g, data_od, data_do)).fetchone()
+        _sp = db.execute(
+            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
+            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as przychod"
+            " FROM produkcja WHERE gospodarstwo_id=? AND data>=? AND data<=?"
+            " AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss"
+            "   WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)",
+            (g, data_od, data_do)).fetchone()
+        stat_zakres = {
+            "szt": int(_sz["szt"]) + int(_sp["szt"]),
+            "przychod": float(_sz["przychod"]) + float(_sp["przychod"])
+        }
 
         koszty_zakres = db.execute(
             "SELECT COALESCE(SUM(wartosc_total),0) as koszty"
             " FROM wydatki WHERE gospodarstwo_id=? AND data>=? AND data<=?",
             (g, data_od, data_do)).fetchone()
 
-        # Statystyki bieżący miesiąc (do kafelka)
-        stat = db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as szt,"
-            " COALESCE(SUM(wartosc),0) as kwota"
+        # Statystyki bieżący miesiąc
+        _sz2 = db.execute(
+            "SELECT COALESCE(SUM(ilosc),0) as szt, COALESCE(SUM(wartosc),0) as kwota"
             " FROM sprzedaz_szczegol WHERE gospodarstwo_id=?"
             " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
+        _sp2 = db.execute(
+            "SELECT COALESCE(SUM(jaja_sprzedane),0) as szt,"
+            " COALESCE(SUM(jaja_sprzedane*COALESCE(cena_sprzedazy,0)),0) as kwota"
+            " FROM produkcja WHERE gospodarstwo_id=?"
+            " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')"
+            " AND NOT EXISTS (SELECT 1 FROM sprzedaz_szczegol ss"
+            "   WHERE ss.gospodarstwo_id=produkcja.gospodarstwo_id AND ss.data=produkcja.data)",
+            (g,)).fetchone()
+        stat = {
+            "szt": int(_sz2["szt"]) + int(_sp2["szt"]),
+            "kwota": float(_sz2["kwota"]) + float(_sp2["kwota"])
+        }
 
         # Klienci z saldami
         klienci_saldo = db.execute("""
@@ -579,20 +598,39 @@ def register_sprzedaz(app):
                 "</div>"
             )
 
+        _kl_count = len(klienci_saldo)
+        _dlug_count = sum(1 for k in klienci_saldo if float(k["saldo"] or 0) > 0.01)
+        _dlug_sum = round(sum(max(0, float(k["saldo"] or 0)) for k in klienci_saldo), 2)
         s_klienci = (
-            "<div style='display:flex;justify-content:space-between;align-items:center;"
-            "margin-bottom:8px;flex-wrap:wrap;gap:8px'>"
-            "<b style='font-size:15px'>👥 Klienci</b>"
-            "<a href='/klienci/dodaj' class='btn bp bsm'>+ Nowy klient</a>"
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center'>"
+            "<div style='cursor:pointer' onclick='toggleKl()'>"
+            "<b style='font-size:15px'>👥 Klienci (" + str(_kl_count) + ")</b>"
+            + (" <span style='font-size:12px;color:#A32D2D;font-weight:600'>" + str(_dlug_count) + " z długiem · " + str(_dlug_sum) + " zł</span>" if _dlug_count > 0 else "")
+            + " <span style='font-size:12px;color:#888' id='kl-arr'>▼</span>"
             "</div>"
+            "<a href='/klienci/dodaj' class='btn bp bsm'>+ Nowy</a>"
+            "</div>"
+            "<div id='kl-body' style='display:none;margin-top:10px'>"
             + anon_html
             + (kl_html or
-               "<div class='card'><p style='color:#888;text-align:center;padding:20px'>"
-               "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p></div>")
-            + "<script>function toggleWpl(id){"
-            "var e=document.getElementById('wpl-'+id);"
-            "e.style.display=e.style.display==='none'?'block':'none';"
-            "}</script>"
+               "<p style='color:#888;text-align:center;padding:8px'>"
+               "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p>")
+            + "</div>"
+            + "<script>"
+            "function toggleKl(){"
+            "  var b=document.getElementById('kl-body');"
+            "  var a=document.getElementById('kl-arr');"
+            "  var open=b.style.display==='none';"
+            "  b.style.display=open?'block':'none';"
+            "  a.textContent=open?'▲':'▼';"
+            "}"
+            "function toggleWpl(id){"
+            "  var e=document.getElementById('wpl-'+id);"
+            "  e.style.display=e.style.display==='none'?'block':'none';"
+            "}"
+            "</script>"
+            "</div>"
         )
 
         straty_mies = 0; za0_mies = 0; pot_strata = 0.0; straty_hist = []
@@ -651,16 +689,38 @@ def register_sprzedaz(app):
                "<tbody>" + sh_rows2 + "</tbody></table></div>" if straty_hist else "")
             + "</div>"
         )
-        html = (
-            "<h1>Sprzedaz</h1>"
-            + s_formularz
-            + s_klienci
-            + s_magazyn
-            + s_zamowienia
-            + s_straty
-            + s_filtr
-            + s_historia
+        html = "<h1>Sprzedaz</h1>"
+
+        # ── KAFELKI STATYSTYK ─────────────────────────────────────────
+        html += (
+            "<style>.sg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}"
+            "@media(max-width:480px){.sg{grid-template-columns:repeat(2,1fr)}}</style>"
+            "<div class='sg'>"
+            "<div class='card stat'><div class='v' style='color:#3B6D11'>" + str(int(stat_zakres["szt"])) + "</div><div class='l'>Sprzedano</div><div class='s'>szt. w zakresie</div></div>"
+            "<div class='card stat'><div class='v' style='color:#3B6D11'>" + str(round(przychod,2)) + " zl</div><div class='l'>Przychod</div><div class='s'>w zakresie</div></div>"
+            "<div class='card stat'><div class='v' style='color:" + zysk_kol + "'>" + zysk_txt + "</div><div class='l'>Zysk/strata</div><div class='s'>przychod-koszty</div></div>"
+            "<div class='card stat'><div class='v' style='color:" + c_stan + "'>" + str(stan) + "</div><div class='l'>W magazynie</div><div class='s'>dostepne: " + str(dostepne) + "</div></div>"
+            + ("<div class='card stat'><div class='v' style='color:#A32D2D'>" + str(round(suma_dlug,2)) + " zl</div><div class='l'>Lacznie dlugow</div><div class='s'>klientow</div></div>" if suma_dlug > 0.01 else "")
+            + "</div>"
         )
+
+        # ── GŁÓWNY LAYOUT: formularz + magazyn ───────────────────────
+        html += s_formularz
+        html += s_magazyn
+
+        # ── ZAMÓWIENIA ────────────────────────────────────────────────
+        html += s_zamowienia
+
+        # ── STRATY ────────────────────────────────────────────────────
+        html += s_straty
+
+        # ── FILTR + HISTORIA ──────────────────────────────────────────
+        html += s_filtr
+        html += s_historia
+
+        # ── KLIENCI (zwijane, na dole) ────────────────────────────────
+        html += s_klienci
+
         return R(html, "zam")
 
     # ── Edycja transakcji sprzedaży (po id) ─────────────────────────────

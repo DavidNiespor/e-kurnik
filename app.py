@@ -936,7 +936,11 @@ def dashboard():
                 "</div>"
             )
         html += (
+<<<<<<< HEAD
             "<div class='card' style='margin-bottom:12px'>"
+=======
+            "<div class='card' style='margin-bottom:0'>"
+>>>>>>> f63cdd402d397f08de921778f78edb517220f8de
             "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
             "<b>Zebrane jaja</b>"
             "<a href='/magazyn-jaj' class='btn bo bsm'>Magazyn</a>"

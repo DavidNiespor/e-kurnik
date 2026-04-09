@@ -91,17 +91,8 @@ def register_produkcja(app):
             " AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()
 
         # Stan magazynu
-        mag = db.execute(
-            "SELECT COALESCE(SUM(jaja_zebrane),0) as p,"
-            " COALESCE(SUM(jaja_sprzedane),0) as s"
-            " FROM produkcja WHERE gospodarstwo_id=?", (g,)).fetchone()
-        straty_tot = int(db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as s FROM jaja_straty"
-            " WHERE gospodarstwo_id=?", (g,)).fetchone()["s"])
-        za0_tot = int(db.execute(
-            "SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol"
-            " WHERE gospodarstwo_id=? AND cena_szt=0", (g,)).fetchone()["s"])
-        stan_mag = max(0, int(mag["p"]) - int(mag["s"]) - straty_tot)
+        from db import stan_magazynu as _sm
+        stan_mag = _sm(db, g)
         rez = int(db.execute(
             "SELECT COALESCE(SUM(ilosc),0) as s FROM zamowienia"
             " WHERE gospodarstwo_id=? AND status IN ('nowe','potwierdzone')",
