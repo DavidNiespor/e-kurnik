@@ -705,10 +705,8 @@ def register_sprzedaz(app):
         )
 
         # ── GŁÓWNY LAYOUT: formularz + magazyn ───────────────────────
-        html += "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:12px'>"
         html += s_formularz
         html += s_magazyn
-        html += "</div>"
 
         # ── ZAMÓWIENIA ────────────────────────────────────────────────
         html += s_zamowienia
