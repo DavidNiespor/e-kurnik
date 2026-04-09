@@ -738,7 +738,7 @@ def dashboard():
     zysk = _z1 + _z2
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
-    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 7", (g,)).fetchall()
+    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 3", (g,)).fetchall()
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
@@ -923,7 +923,18 @@ def dashboard():
         )
     # Formularz zebranych + szybka sprzedaz
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:10px">'
+
     if _pokaz("pokaz_jaja_form"):
+        # Max 3 ostatnie wpisy - zwarte jak zamowienia
+        _hist_html = ""
+        for _r in ostatnie:
+            _hist_html += (
+                "<div style='display:flex;justify-content:space-between;align-items:center;"
+                "padding:5px 10px;background:#f5f5f0;border-radius:7px;margin-bottom:4px'>"
+                "<span style='font-size:12px;color:#888'>" + _r["data"] + "</span>"
+                "<b style='font-size:13px'>" + str(_r["jaja_zebrane"]) + " szt.</b>"
+                "</div>"
+            )
         html += (
             "<div class='card' style='margin-bottom:0'>"
             "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
@@ -932,61 +943,60 @@ def dashboard():
             "</div>"
             "<form method='POST' action='/produkcja/dodaj'>"
             "<div style='display:flex;justify-content:space-between;align-items:center;"
-            "padding:7px 10px;border-radius:8px;background:#f5f5f0;margin-bottom:5px'>"
+            "padding:7px 10px;background:#EAF3DE;border-radius:8px;margin-bottom:6px'>"
             "<div>"
             "<div style='font-weight:600;font-size:13px'>Dzisiaj</div>"
             "<div style='font-size:11px;color:#888'>" + date.today().strftime("%d.%m.%Y") + "</div>"
             "</div>"
             "<div style='display:flex;align-items:center;gap:8px'>"
             "<input name='jaja_zebrane' type='number' min='0' value='" + (str(dzis["jaja_zebrane"]) if dzis else "") + "'"
-            " placeholder='0' style='font-size:18px;text-align:center;width:80px;padding:4px' required>"
-            "<span style='font-size:12px;color:#888'>szt.</span>"
+            " placeholder='0' style='font-size:18px;text-align:center;width:72px;padding:4px' required>"
             "<input name='data' type='hidden' value='" + date.today().isoformat() + "'>"
             "<button class='btn bg bsm' style='white-space:nowrap'>✓ Zapisz</button>"
             "</div></div>"
-            + ("".join(
-                "<div style='display:flex;justify-content:space-between;align-items:center;"
-                "padding:5px 10px;border-radius:6px;margin-bottom:3px'>"
-                "<div style='font-size:12px;color:#888'>" + _r["data"] + "</div>"
-                "<b style='font-size:14px'>" + str(_r["jaja_zebrane"]) + " szt.</b>"
-                "</div>"
-                for _r in ostatnie) if ostatnie else "")
+            + _hist_html
             + "</form></div>"
         )
+
     if _pokaz("pokaz_sprzedaz_form"):
-        _zam_opts = "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + " - " + (z["kn"] or "?") + " " + str(z["ilosc"]) + " szt.</option>" for z in zamow_aktywne)
         _kl_opts = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + "</option>" for k in klienci)
         html += (
             "<div class='card' style='margin-bottom:0'>"
             "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
-            "<b>Szybka sprzedaz</b>"
+            "<b>Szybka sprzedaż</b>"
             "<a href='/sprzedaz' class='btn bo bsm'>Historia</a>"
             "</div>"
             "<form method='POST' action='/sprzedaz'>"
             "<input type='hidden' name='data' value='" + date.today().isoformat() + "'>"
+            "<input type='hidden' name='typ_sprzedazy' value='gotowka'>"
+            "<input type='hidden' name='zamowienie_id' value=''>"
             "<div style='display:flex;justify-content:space-between;align-items:center;"
-            "padding:7px 10px;border-radius:8px;background:#f5f5f0;margin-bottom:8px'>"
-            "<div style='display:flex;align-items:center;gap:8px'>"
+            "padding:7px 10px;background:#f5f5f0;border-radius:8px;margin-bottom:6px'>"
+            "<div style='display:flex;align-items:center;gap:10px'>"
             "<div><label style='font-size:11px;color:#888;display:block'>Szt.</label>"
-            "<input name='jaja_sprzedane' type='number' min='0' value='0' id='sp_d' oninput='cWd()' style='font-size:18px;text-align:center;width:80px'></div>"
+            "<input name='jaja_sprzedane' type='number' min='0' value='0' id='sp_d' oninput='cWd()'"
+            " style='font-size:18px;text-align:center;width:72px'></div>"
             "<div><label style='font-size:11px;color:#888;display:block'>Cena/szt</label>"
-            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs("cena_jajka","1.20") + "' id='cn_d' oninput='cWd()' style='font-size:18px;text-align:center;width:80px'></div>"
+            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs('cena_jajka','1.20') + "' id='cn_d' oninput='cWd()'"
+            " style='font-size:18px;text-align:center;width:72px'></div>"
             "</div>"
             "<div style='text-align:right'>"
             "<div style='font-size:11px;color:#888'>Wartość</div>"
-            "<b id='wrd' style='font-size:15px'>0.00 zl</b>"
+            "<b id='wrd' style='font-size:15px'>0.00 zł</b>"
             "</div></div>"
-            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px'>"
-            "<div><label style='font-size:11px;color:#888'>Klient</label>"
-            "<select name='klient_id'><option value=''>— anonimowa —</option>" + _kl_opts + "</select></div>"
-            "<div><label style='font-size:11px;color:#888'>Platnosc</label>"
-            "<select name='typ_sprzedazy'><option value='gotowka'>Gotowka</option><option value='przelew'>Przelew</option><option value='nastepnym_razem'>Nastepnym razem</option><option value='z_salda'>Z salda</option></select></div>"
+            "<div style='display:flex;gap:6px;margin-bottom:6px'>"
+            "<select name='klient_id' style='flex:1;font-size:13px'>"
+            "<option value=''>— anonimowa —</option>" + _kl_opts +
+            "</select>"
+            "<button class='btn bp' style='white-space:nowrap;padding:8px 14px'>Zapisz</button>"
             "</div>"
-            + ("<select name='zamowienie_id' style='margin-top:6px'><option value=''>— bez zamowienia —</option>" + _zam_opts + "</select>" if zamow_aktywne else "")
-            + "<button class='btn bp' style='width:100%;margin-top:8px;padding:9px;font-size:13px'>Zapisz sprzedaz</button>"
-            "<script>function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,c=parseFloat(document.getElementById('cn_d').value)||0;document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zl';}cWd();</script>"
+            "<script>function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,"
+            "c=parseFloat(document.getElementById('cn_d').value)||0;"
+            "document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zł';}cWd();</script>"
             "</form></div>"
         )
+
+    html += '</div>'
     html += '</div>'
 
     return R(html, "dash")
