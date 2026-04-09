@@ -598,20 +598,39 @@ def register_sprzedaz(app):
                 "</div>"
             )
 
+        _kl_count = len(klienci_saldo)
+        _dlug_count = sum(1 for k in klienci_saldo if float(k["saldo"] or 0) > 0.01)
+        _dlug_sum = round(sum(max(0, float(k["saldo"] or 0)) for k in klienci_saldo), 2)
         s_klienci = (
-            "<div style='display:flex;justify-content:space-between;align-items:center;"
-            "margin-bottom:8px;flex-wrap:wrap;gap:8px'>"
-            "<b style='font-size:15px'>👥 Klienci</b>"
-            "<a href='/klienci/dodaj' class='btn bp bsm'>+ Nowy klient</a>"
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center'>"
+            "<div style='cursor:pointer' onclick='toggleKl()'>"
+            "<b style='font-size:15px'>👥 Klienci (" + str(_kl_count) + ")</b>"
+            + (" <span style='font-size:12px;color:#A32D2D;font-weight:600'>" + str(_dlug_count) + " z długiem · " + str(_dlug_sum) + " zł</span>" if _dlug_count > 0 else "")
+            + " <span style='font-size:12px;color:#888' id='kl-arr'>▼</span>"
             "</div>"
+            "<a href='/klienci/dodaj' class='btn bp bsm'>+ Nowy</a>"
+            "</div>"
+            "<div id='kl-body' style='display:none;margin-top:10px'>"
             + anon_html
             + (kl_html or
-               "<div class='card'><p style='color:#888;text-align:center;padding:20px'>"
-               "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p></div>")
-            + "<script>function toggleWpl(id){"
-            "var e=document.getElementById('wpl-'+id);"
-            "e.style.display=e.style.display==='none'?'block':'none';"
-            "}</script>"
+               "<p style='color:#888;text-align:center;padding:8px'>"
+               "Brak klientów. <a href='/klienci/dodaj' style='color:#534AB7'>Dodaj →</a></p>")
+            + "</div>"
+            + "<script>"
+            "function toggleKl(){"
+            "  var b=document.getElementById('kl-body');"
+            "  var a=document.getElementById('kl-arr');"
+            "  var open=b.style.display==='none';"
+            "  b.style.display=open?'block':'none';"
+            "  a.textContent=open?'▲':'▼';"
+            "}"
+            "function toggleWpl(id){"
+            "  var e=document.getElementById('wpl-'+id);"
+            "  e.style.display=e.style.display==='none'?'block':'none';"
+            "}"
+            "</script>"
+            "</div>"
         )
 
         straty_mies = 0; za0_mies = 0; pot_strata = 0.0; straty_hist = []
@@ -673,12 +692,12 @@ def register_sprzedaz(app):
         html = (
             "<h1>Sprzedaz</h1>"
             + s_formularz
-            + s_klienci
             + s_magazyn
             + s_zamowienia
             + s_straty
             + s_filtr
             + s_historia
+            + s_klienci
         )
         return R(html, "zam")
 

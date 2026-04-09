@@ -896,6 +896,40 @@ def dashboard():
         '</div>'
         + (sterowanie_html if _pokaz_ster else "")
         + _kafelki_czynnosci(g)
+        + (lambda: (
+            '<div class="card" style="margin-bottom:12px">'
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+            '<b>📦 Zamówienia do realizacji</b>'
+            '<div style="display:flex;gap:8px">'
+            '<a href="/zamowienia/dodaj" class="btn bp bsm">+ Nowe</a>'
+            '<a href="/zamowienia" class="btn bo bsm">Wszystkie →</a>'
+            '</div></div>'
+            + "".join(
+                '<div style="display:flex;justify-content:space-between;align-items:center;'
+                'padding:8px 10px;border-radius:8px;margin-bottom:6px;'
+                + ("background:#fff3cd;" if z["data_dostawy"] <= date.today().isoformat() else "background:#f5f5f0;")
+                + '">'
+                '<div>'
+                '<div style="font-weight:600;font-size:14px">' + (z["kn"] or "— brak klienta —") + '</div>'
+                '<div style="font-size:12px;color:#888">'
+                + z["data_dostawy"]
+                + (" ⚠️ <b style=\"color:#A32D2D\">dziś!</b>" if z["data_dostawy"] == date.today().isoformat() else
+                   " ⚠️ <b style=\"color:#A32D2D\">zaległe</b>" if z["data_dostawy"] < date.today().isoformat() else
+                   " · za " + str((date.fromisoformat(z["data_dostawy"]) - date.today()).days) + " dni")
+                + '</div></div>'
+                '<div style="display:flex;align-items:center;gap:10px">'
+                '<div style="text-align:right">'
+                '<div style="font-weight:700;font-size:16px">' + str(z["ilosc"]) + ' szt.</div>'
+                '<div style="font-size:12px;color:#3B6D11">' + str(round(z["ilosc"]*(z["cena_za_szt"] or 0),2)) + ' zł</div>'
+                '</div>'
+                '<a href="/zamowienia/' + str(z["id"]) + '/status/dostarczone" class="btn bg bsm"'
+                ' style="white-space:nowrap">✓ Dostarcz</a>'
+                '</div></div>'
+                for z in zamow_aktywne
+            )
+            + ('<p style="color:#888;font-size:13px;text-align:center;padding:6px">Brak aktywnych zamówień</p>' if not zamow_aktywne else "")
+            + '</div>'
+        ) if zamow_aktywne or True else "")()
         + '<div class="g2">'
 
         # Formularz 1: Zebrane jaja
