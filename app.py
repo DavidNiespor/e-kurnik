@@ -738,7 +738,7 @@ def dashboard():
     zysk = _z1 + _z2
     wyd  = db.execute("SELECT COALESCE(SUM(wartosc_total),0) as s FROM wydatki WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"]
     dzis = db.execute("SELECT * FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()
-    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 3", (g,)).fetchall()
+    ostatnie = db.execute("SELECT data, jaja_zebrane FROM produkcja WHERE gospodarstwo_id=? AND data < date('now') ORDER BY data DESC LIMIT 3", (g,)).fetchall()
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
@@ -922,7 +922,7 @@ def dashboard():
             + "</div>"
         )
     # Formularz zebranych + szybka sprzedaz
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:10px">'
+    html += '<div style="margin-bottom:10px">'
 
     if _pokaz("pokaz_jaja_form"):
         # Max 3 ostatnie wpisy - zwarte jak zamowienia
