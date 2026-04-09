@@ -742,7 +742,7 @@ def dashboard():
     zam_dzis = db.execute("SELECT COUNT(*) as c FROM zamowienia WHERE gospodarstwo_id=? AND data_dostawy=date('now') AND status NOT IN ('dostarczone','anulowane')", (g,)).fetchone()["c"]
     urzadz = db.execute("SELECT * FROM urzadzenia WHERE gospodarstwo_id=? AND aktywne=1 ORDER BY nazwa", (g,)).fetchall()
     kal = db.execute("SELECT * FROM kalendarz WHERE gospodarstwo_id=? AND aktywne=1 AND nastepne<=date('now','+7 days') ORDER BY nastepne LIMIT 3", (g,)).fetchall()
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     zamow_aktywne = db.execute("""SELECT z.id,z.data_dostawy,z.ilosc,z.cena_za_szt,k.nazwa as kn FROM zamowienia z
         LEFT JOIN klienci k ON z.klient_id=k.id
         WHERE z.gospodarstwo_id=? AND z.status IN ('nowe','potwierdzone')
@@ -1347,7 +1347,7 @@ def zamowienia_dodaj():
         flash("Zamówienie dodane.")
         return redirect("/zamowienia")
     db = get_db()
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     db.close()
     opt = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
     html = (
