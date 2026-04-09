@@ -2088,8 +2088,9 @@ def register_routes(app):
                 for k in ["pasza_dzienna_kg","cena_jajka","etykieta_producent","etykieta_adres","lat","lon"]:
                     v = request.form.get(k)
                     if v is not None: save_setting(k, v.strip(), g)
-                # Toggle sterowania na dashboardzie
-                save_setting("pokaz_sterowanie", "1" if request.form.get("pokaz_sterowanie") else "0", g)
+                # Togglei elementów dashboardu
+                for tog in ["pokaz_sterowanie","pokaz_czynnosci","pokaz_zamowienia","pokaz_jaja_form","pokaz_sprzedaz_form"]:
+                    save_setting(tog, "1" if request.form.get(tog) else "0", g)
                 flash("Ustawienia podstawowe zapisane.")
             elif sekcja == "media":
                 for k in ["cena_wody_litra","cena_kwh"]:
@@ -2140,13 +2141,29 @@ def register_routes(app):
             '<input name="etykieta_adres" value="' + _v("etykieta_adres","") + '"></div>'
             '</div>'
             '<div style="margin-top:10px;padding:10px;background:#f5f5f0;border-radius:8px">'
-            '<label style="display:flex;align-items:center;gap:10px;cursor:pointer">'
+            '<b style="font-size:13px">Widoczność elementów na dashboardzie</b>'
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">'
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">'
             '<input type="checkbox" name="pokaz_sterowanie"'
             + (' checked' if _v('pokaz_sterowanie','1')=='1' else '') +
-            ' style="width:18px;height:18px">'
-            '<div><b>Pokazuj sterowanie na dashboardzie</b>'
-            '<br><span style="font-size:12px;color:#888">Odznacz jeśli nie używasz GPIO/Supla</span>'
-            '</div></label></div>'
+            ' style="width:15px;height:15px">Sterowanie GPIO/Supla</label>'
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">'
+            '<input type="checkbox" name="pokaz_czynnosci"'
+            + (' checked' if _v('pokaz_czynnosci','1')=='1' else '') +
+            ' style="width:15px;height:15px">Czynności dzienne</label>'
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">'
+            '<input type="checkbox" name="pokaz_zamowienia"'
+            + (' checked' if _v('pokaz_zamowienia','1')=='1' else '') +
+            ' style="width:15px;height:15px">Zamówienia</label>'
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">'
+            '<input type="checkbox" name="pokaz_jaja_form"'
+            + (' checked' if _v('pokaz_jaja_form','1')=='1' else '') +
+            ' style="width:15px;height:15px">Formularz zebranych jaj</label>'
+            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">'
+            '<input type="checkbox" name="pokaz_sprzedaz_form"'
+            + (' checked' if _v('pokaz_sprzedaz_form','1')=='1' else '') +
+            ' style="width:15px;height:15px">Szybka sprzedaż</label>'
+            '</div></div>'
             '<button class="btn bp bsm" style="margin-top:10px">Zapisz</button>'
             '</form></div>'
         )

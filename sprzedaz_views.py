@@ -689,16 +689,40 @@ def register_sprzedaz(app):
                "<tbody>" + sh_rows2 + "</tbody></table></div>" if straty_hist else "")
             + "</div>"
         )
-        html = (
-            "<h1>Sprzedaz</h1>"
-            + s_formularz
-            + s_magazyn
-            + s_zamowienia
-            + s_straty
-            + s_filtr
-            + s_historia
-            + s_klienci
+        html = "<h1>Sprzedaz</h1>"
+
+        # ── KAFELKI STATYSTYK ─────────────────────────────────────────
+        html += (
+            "<style>.sg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}"
+            "@media(max-width:480px){.sg{grid-template-columns:repeat(2,1fr)}}</style>"
+            "<div class='sg'>"
+            "<div class='card stat'><div class='v' style='color:#3B6D11'>" + str(int(stat_zakres["szt"])) + "</div><div class='l'>Sprzedano</div><div class='s'>szt. w zakresie</div></div>"
+            "<div class='card stat'><div class='v' style='color:#3B6D11'>" + str(round(przychod,2)) + " zl</div><div class='l'>Przychod</div><div class='s'>w zakresie</div></div>"
+            "<div class='card stat'><div class='v' style='color:" + zysk_kol + "'>" + zysk_txt + "</div><div class='l'>Zysk/strata</div><div class='s'>przychod-koszty</div></div>"
+            "<div class='card stat'><div class='v' style='color:" + c_stan + "'>" + str(stan) + "</div><div class='l'>W magazynie</div><div class='s'>dostepne: " + str(dostepne) + "</div></div>"
+            + ("<div class='card stat'><div class='v' style='color:#A32D2D'>" + str(round(suma_dlug,2)) + " zl</div><div class='l'>Lacznie dlugow</div><div class='s'>klientow</div></div>" if suma_dlug > 0.01 else "")
+            + "</div>"
         )
+
+        # ── GŁÓWNY LAYOUT: formularz + magazyn ───────────────────────
+        html += "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-bottom:12px'>"
+        html += s_formularz
+        html += s_magazyn
+        html += "</div>"
+
+        # ── ZAMÓWIENIA ────────────────────────────────────────────────
+        html += s_zamowienia
+
+        # ── STRATY ────────────────────────────────────────────────────
+        html += s_straty
+
+        # ── FILTR + HISTORIA ──────────────────────────────────────────
+        html += s_filtr
+        html += s_historia
+
+        # ── KLIENCI (zwijane, na dole) ────────────────────────────────
+        html += s_klienci
+
         return R(html, "zam")
 
     # ── Edycja transakcji sprzedaży (po id) ─────────────────────────────

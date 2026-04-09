@@ -777,6 +777,15 @@ def dashboard():
     prad_dzis  = float(db2.execute("SELECT COALESCE(SUM(kwh),0) as s FROM prad_odczyty WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     pasza_dzis = float(db2.execute("SELECT COALESCE(SUM(pasza_wydana_kg),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data=date('now')", (g,)).fetchone()["s"] or 0)
     db2.close()
+    db3 = get_db()
+    zebrane_7d = int(db3.execute("SELECT COALESCE(SUM(jaja_zebrane),0) as s FROM produkcja WHERE gospodarstwo_id=? AND data>=date('now','-7 days')", (g,)).fetchone()["s"])
+    sprzedane_mies_szt = int(db3.execute("SELECT COALESCE(SUM(ilosc),0) as s FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND strftime('%Y-%m',data)=strftime('%Y-%m','now')", (g,)).fetchone()["s"])
+    pasza_stan = 0.0
+    try: pasza_stan = float(db3.execute("SELECT COALESCE(SUM(stan),0) as s FROM stan_magazynu WHERE gospodarstwo_id=?", (g,)).fetchone()["s"] or 0)
+    except Exception: pass
+    pasza_dni = int(round(pasza_stan / float(gs("pasza_dzienna_kg","6")))) if float(gs("pasza_dzienna_kg","6")) > 0 and pasza_stan > 0 else 0
+    db3.close()
+    def _pokaz(k, d="1"): return gs(k, d) == "1"
 
     def _kaf_row(row):
         on  = bool(row["stan"])
@@ -885,87 +894,103 @@ def dashboard():
     html = (
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
         '<h1 style="margin-bottom:0">Dashboard</h1>'
-        '<span style="font-size:14px;color:#5f5e5a;font-weight:500">' + _data_str + '</span>'
+        '<span style="font-size:13px;color:#5f5e5a">' + _data_str + '</span>'
         '</div>'
         + al_html
-        + '<div class="g4" style="margin-bottom:10px">'
-        '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7 dni</div><div class="s">' + str(kur) + ' niosek</div></div>'
-        '<div class="card stat"><div class="v">' + str(mag_stan) + '</div><div class="l">Jaj w magazynie</div><div class="s">zarezerwowane: ' + str(zarez) + '</div></div>'
-        '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,0)) + ' zł</div><div class="l">Przychód miesiąc</div><div class="s">wydatki: ' + str(round(wyd,0)) + ' zł</div></div>'
-        '<div class="card stat"><div class="v">' + str(round(zysk-wyd,0)) + ' zł</div><div class="l">Zysk miesiąc</div></div>'
-        '</div>'
-        + (sterowanie_html if _pokaz_ster else "")
-        + _kafelki_czynnosci(g)
-        + (lambda: (
-            '<div class="card" style="margin-bottom:12px">'
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-            '<b>📦 Zamówienia do realizacji</b>'
-            '<div style="display:flex;gap:8px">'
-            '<a href="/zamowienia/dodaj" class="btn bp bsm">+ Nowe</a>'
-            '<a href="/zamowienia" class="btn bo bsm">Wszystkie →</a>'
-            '</div></div>'
-            + "".join(
-                '<div style="display:flex;justify-content:space-between;align-items:center;'
-                'padding:8px 10px;border-radius:8px;margin-bottom:6px;'
-                + ("background:#fff3cd;" if z["data_dostawy"] <= date.today().isoformat() else "background:#f5f5f0;")
-                + '">'
-                '<div>'
-                '<div style="font-weight:600;font-size:14px">' + (z["kn"] or "— brak klienta —") + '</div>'
-                '<div style="font-size:12px;color:#888">'
-                + z["data_dostawy"]
-                + (" ⚠️ <b style=\"color:#A32D2D\">dziś!</b>" if z["data_dostawy"] == date.today().isoformat() else
-                   " ⚠️ <b style=\"color:#A32D2D\">zaległe</b>" if z["data_dostawy"] < date.today().isoformat() else
-                   " · za " + str((date.fromisoformat(z["data_dostawy"]) - date.today()).days) + " dni")
-                + '</div></div>'
-                '<div style="display:flex;align-items:center;gap:10px">'
-                '<div style="text-align:right">'
-                '<div style="font-weight:700;font-size:16px">' + str(z["ilosc"]) + ' szt.</div>'
-                '<div style="font-size:12px;color:#3B6D11">' + str(round(z["ilosc"]*(z["cena_za_szt"] or 0),2)) + ' zł</div>'
-                '</div>'
-                '<a href="/zamowienia/' + str(z["id"]) + '/status/dostarczone" class="btn bg bsm"'
-                ' style="white-space:nowrap">✓ Dostarcz</a>'
-                '</div></div>'
-                for z in zamow_aktywne
-            )
-            + ('<p style="color:#888;font-size:13px;text-align:center;padding:6px">Brak aktywnych zamówień</p>' if not zamow_aktywne else "")
-            + '</div>'
-        ) if zamow_aktywne or True else "")()
-        + '<div class="g2">'
-
-        # Formularz 1: Zebrane jaja
-        + _jaja_form
-
-        # Formularz 2: Szybka sprzedaż → /sprzedaz (z zamówieniami)
-        + (lambda: (
-            '<div class="card"><b>Sprzedaż — dziś</b>'
-            '<form method="POST" action="/sprzedaz" style="margin-top:10px">'
-            '<input type="hidden" name="data" value="' + date.today().isoformat() + '">'
-            '<label>Sprzedane (szt)</label>'
-            '<input name="jaja_sprzedane" type="number" min="0" value="0" id="sp_d" oninput="cWd()" style="font-size:18px;text-align:center">'
-            '<label>Cena/szt (zł)</label>'
-            '<input name="cena_sprzedazy" type="number" step="0.01" value="' + gs('cena_jajka','1.20') + '" id="cn_d" oninput="cWd()">'
-            '<div style="background:#f5f5f0;border-radius:6px;padding:6px 10px;font-size:13px;margin:4px 0">Wartość: <b id="wrd">0.00 zł</b></div>'
-            '<label>Klient</label>'
-            '<select name="klient_id"><option value="">— anonimowa —</option>'
-            + "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
-            + '</select>'
-            '<label>Typ płatności</label>'
-            '<select name="typ_sprzedazy"><option value="gotowka">Gotówka</option><option value="przelew">Przelew</option><option value="nastepnym_razem">Następnym razem</option><option value="z_salda">Z salda</option></select>'
-            '<label>Zamówienie</label>'
-            '<select name="zamowienie_id"><option value="">— bez zamówienia —</option>'
-            + "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + ' · ' + (z["kn"] or "?") + ' · ' + str(z["ilosc"]) + ' szt.</option>' for z in zamow_aktywne)
-            + '</select>'
-            + ('<div style="background:#fff3cd;border-radius:6px;padding:6px 10px;font-size:12px;margin:4px 0">📦 '
-               + str(len(zamow_aktywne)) + ' zamówień do realizacji'
-               + (' — <b>dziś: ' + str(sum(1 for z in zamow_aktywne if z["data_dostawy"] <= date.today().isoformat())) + '</b>' if any(z["data_dostawy"] <= date.today().isoformat() for z in zamow_aktywne) else "")
-               + '</div>' if zamow_aktywne else "")
-            + '<br><button class="btn bp" style="width:100%;margin-top:10px;padding:11px">Zapisz sprzedaż</button>'
-            '<script>function cWd(){var s=parseFloat(document.getElementById("sp_d").value)||0,c=parseFloat(document.getElementById("cn_d").value)||0;document.getElementById("wrd").textContent=(s*c).toFixed(2)+" zł";}cWd();</script>'
-            '</form></div>'
-        ))()
-
-        # Pasza i woda wbudowane w czynnosci
+        + '<style>.dg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}'
+        '@media(max-width:480px){.dg{grid-template-columns:repeat(2,1fr)}}</style>'
+        + '<div class="dg">'
+        + '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7d</div><div class="s">' + str(kur) + ' niosek</div></div>'
+        + '<div class="card stat"><div class="v">' + str(zebrane_7d) + '</div><div class="l">Zebrane 7d</div><div class="s">szt.</div></div>'
+        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(sprzedane_mies_szt) + '</div><div class="l">Sprzedane mies.</div><div class="s">szt.</div></div>'
+        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,2)) + ' zł</div><div class="l">Zarobek mies.</div><div class="s">wyd: ' + str(round(float(wyd),0)) + ' zł</div></div>'
+        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan > 0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">rez. ' + str(int(zarez)) + '</div></div>'
+        + ('<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if pasza_dni > 0 and pasza_dni < 7 else '#BA7517' if pasza_dni < 14 else '#3B6D11') + '">' + str(pasza_dni) + 'd</div><div class="l">Pasza zostanie</div><div class="s">' + str(round(pasza_stan,1)) + ' kg</div></div>' if pasza_stan > 0 else '')
+        + '</div>'
+        + (sterowanie_html if _pokaz("pokaz_sterowanie") else "")
+        + (_kafelki_czynnosci(g) if _pokaz("pokaz_czynnosci") else "")
     )
+    # Zamowienia
+    if _pokaz("pokaz_zamowienia"):
+        _zam_rows = ""
+        for z in zamow_aktywne:
+            _alarm = " dzis!" if z["data_dostawy"] == date.today().isoformat() else " zaglegle!" if z["data_dostawy"] < date.today().isoformat() else " za " + str((date.fromisoformat(z["data_dostawy"]) - date.today()).days) + " dni"
+            _bg = "background:#fff3cd;" if z["data_dostawy"] <= date.today().isoformat() else "background:#f5f5f0;"
+            _zam_rows += (
+                "<div style='display:flex;justify-content:space-between;align-items:center;"
+                "padding:7px 10px;border-radius:8px;margin-bottom:5px;" + _bg + "'>"
+                "<div>"
+                "<div style='font-weight:600;font-size:13px'>" + (z["kn"] or "—") + "</div>"
+                "<div style='font-size:11px;color:#888'>" + z["data_dostawy"] + _alarm + "</div>"
+                "</div>"
+                "<div style='display:flex;align-items:center;gap:8px'>"
+                "<div style='text-align:right'>"
+                "<b style='font-size:15px'>" + str(z["ilosc"]) + " szt.</b>"
+                "<div style='font-size:11px;color:#3B6D11'>" + str(round(z["ilosc"]*(z["cena_za_szt"] or 0),2)) + " zl</div>"
+                "</div>"
+                "<a href='/zamowienia/" + str(z["id"]) + "/status/dostarczone' class='btn bg bsm'>✓</a>"
+                "</div></div>"
+            )
+        html += (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+            "<b>Zamowienia</b>"
+            "<div style='display:flex;gap:6px'>"
+            "<a href='/zamowienia/dodaj' class='btn bp bsm'>+ Nowe</a>"
+            "<a href='/zamowienia' class='btn bo bsm'>Wszystkie</a>"
+            "</div></div>"
+            + (_zam_rows or "<p style='color:#888;font-size:12px;text-align:center'>Brak zamowien</p>")
+            + "</div>"
+        )
+    # Formularz zebranych + szybka sprzedaz
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:10px">'
+    if _pokaz("pokaz_jaja_form"):
+        html += (
+            "<div class='card'>"
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+            "<b style='font-size:13px'>Zebrane jaja</b>"
+            + ("<span style='font-size:12px;color:#3B6D11;font-weight:600'>" + str(dzis["jaja_zebrane"]) + " szt. dzis</span>"
+               if dzis else "<span style='font-size:11px;color:#aaa'>brak dziś</span>")
+            + "</div>"
+            + ("<div style='display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px'>" + _ostatnie_html + "</div>" if _ostatnie_html else "")
+            + "<form method='POST' action='/produkcja/dodaj'>"
+            + "<div style='display:flex;gap:6px;align-items:flex-end'>"
+            + "<div style='flex:1'><label style='font-size:11px;color:#888'>Szt.</label>"
+            + "<input name='jaja_zebrane' type='number' min='0' value='" + (str(dzis["jaja_zebrane"]) if dzis else "") + "'"
+            + " placeholder='0' style='font-size:18px;text-align:center;padding:6px' required></div>"
+            + "<div><label style='font-size:11px;color:#888'>Data</label>"
+            + "<input name='data' type='date' value='" + date.today().isoformat() + "' style='font-size:12px;padding:6px'></div>"
+            + "</div>"
+            + "<button class='btn bg' style='width:100%;margin-top:8px;padding:8px;font-size:13px'>Zapisz</button>"
+            + "</form></div>"
+        )
+    if _pokaz("pokaz_sprzedaz_form"):
+        _zam_opts = "".join('<option value="' + str(z["id"]) + '">' + z["data_dostawy"] + " - " + (z["kn"] or "?") + " " + str(z["ilosc"]) + " szt.</option>" for z in zamow_aktywne)
+        _kl_opts = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + "</option>" for k in klienci)
+        html += (
+            "<div class='card'><b style='font-size:13px'>Szybka sprzedaz</b>"
+            "<form method='POST' action='/sprzedaz' style='margin-top:8px'>"
+            "<input type='hidden' name='data' value='" + date.today().isoformat() + "'>"
+            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px'>"
+            "<div><label style='font-size:11px;color:#888'>Szt.</label>"
+            "<input name='jaja_sprzedane' type='number' min='0' value='0' id='sp_d' oninput='cWd()' style='font-size:18px;text-align:center'></div>"
+            "<div><label style='font-size:11px;color:#888'>Cena/szt</label>"
+            "<input name='cena_sprzedazy' type='number' step='0.01' value='" + gs('cena_jajka','1.20') + "' id='cn_d' oninput='cWd()' style='font-size:18px;text-align:center'></div>"
+            "</div>"
+            "<div style='background:#f5f5f0;border-radius:6px;padding:5px 10px;font-size:13px;margin:6px 0'>Wartosc: <b id='wrd'>0.00 zl</b></div>"
+            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:6px'>"
+            "<div><label style='font-size:11px;color:#888'>Klient</label>"
+            "<select name='klient_id'><option value=''>— anonimowa —</option>" + _kl_opts + "</select></div>"
+            "<div><label style='font-size:11px;color:#888'>Platnosc</label>"
+            "<select name='typ_sprzedazy'><option value='gotowka'>Gotowka</option><option value='przelew'>Przelew</option><option value='nastepnym_razem'>Nastepnym razem</option><option value='z_salda'>Z salda</option></select></div>"
+            "</div>"
+            + ("<select name='zamowienie_id' style='margin-top:6px'><option value=''>— bez zamowienia —</option>" + _zam_opts + "</select>" if zamow_aktywne else "")
+            + "<button class='btn bp' style='width:100%;margin-top:8px;padding:9px;font-size:13px'>Zapisz sprzedaz</button>"
+            "<script>function cWd(){var s=parseFloat(document.getElementById('sp_d').value)||0,c=parseFloat(document.getElementById('cn_d').value)||0;document.getElementById('wrd').textContent=(s*c).toFixed(2)+' zl';}cWd();</script>"
+            "</form></div>"
+        )
+    html += '</div>'
+
     return R(html, "dash")
 
 
