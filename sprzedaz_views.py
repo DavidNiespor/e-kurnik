@@ -113,9 +113,14 @@ def register_sprzedaz(app):
                 flash_msg = "Zapisano: " + str(sprzed) + " szt. x " + str(cena) + " zl = " + str(kwota) + " zl"
                 if rabat > 0: flash_msg += " (rabat: " + str(rabat) + " zl)"
 
+            sid = db.execute("SELECT MAX(id) FROM sprzedaz_szczegol WHERE gospodarstwo_id=?", (g,)).fetchone()[0]
             db.commit(); db.close()
+            # Jesli klient i typ "nastepnym_razem" lub ma saldo — pokaz rozliczenie
+            if kid and typ in ("nastepnym_razem","gotowka","przelew"):
+                flash(flash_msg)
+                return redirect("/sprzedaz/rozlicz/" + str(sid))
             flash(flash_msg)
-            return redirect("/sprzedaz")
+            return redirect(request.referrer or "/sprzedaz")
 
         # ── GET ───────────────────────────────────────────────────────────
         # Filtr dat - priorytet: query param > sesja > biezacy miesiac
@@ -724,6 +729,74 @@ def register_sprzedaz(app):
         return R(html, "zam")
 
     # ── Edycja transakcji sprzedaży (po id) ─────────────────────────────
+    @app.route("/sprzedaz/rozlicz/<int:sid>", methods=["GET","POST"])
+    @farm_required
+    def sprzedaz_rozlicz(sid):
+        """Ekran rozliczenia długu po sprzedaży."""
+        g = gid(); db = get_db()
+        sp = db.execute(
+            "SELECT ss.*, k.nazwa as kn, k.cena_indyw FROM sprzedaz_szczegol ss"
+            " LEFT JOIN klienci k ON k.id=ss.klient_id"
+            " WHERE ss.id=? AND ss.gospodarstwo_id=?", (sid, g)).fetchone()
+        if not sp or not sp["klient_id"]:
+            db.close(); return redirect("/sprzedaz")
+
+        kid = sp["klient_id"]
+        ks = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+        saldo = float(ks["saldo_pln"] if ks else 0)
+        kwota_sp = float(sp["wartosc"] or 0)
+
+        if request.method == "POST":
+            action = request.form.get("action","")
+            wplata = float(request.form.get("kwota", 0) or 0)
+            rozlicz0 = request.form.get("rozlicz0") == "1"
+            if action in ("wplata","rozlicz0"):
+                from datetime import datetime
+                if rozlicz0: wplata = max(0, saldo); nowe_sal = 0.0
+                else: nowe_sal = round(saldo - wplata, 2)
+                if ks:
+                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
+                else:
+                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe_sal))
+                db.execute(
+                    "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
+                    (g, kid, "wplata", -wplata, "Wpłata przy sprzedaży #"+str(sid), nowe_sal))
+                db.commit(); db.close()
+                flash("Wpłata " + str(round(wplata,2)) + " zł. Nowe saldo: " + str(nowe_sal) + " zł")
+            else:
+                db.close()
+            return redirect(request.referrer.replace("/rozlicz/"+str(sid),"") if request.referrer else "/sprzedaz")
+
+        db.close()
+        # Kolor salda
+        s_kol = "#A32D2D" if saldo > 0.01 else "#3B6D11" if saldo < -0.01 else "#888"
+        s_txt = ("Dług: " + str(round(saldo,2)) + " zł") if saldo > 0.01 else ("Nadpłata: " + str(round(-saldo,2)) + " zł") if saldo < -0.01 else "Rozliczony"
+        html = (
+            "<h1>Rozliczenie — " + (sp["kn"] or "klient") + "</h1>"
+            "<div class='card' style='max-width:480px;margin:0 auto'>"
+            "<div style='display:flex;justify-content:space-between;margin-bottom:12px'>"
+            "<div><div style='font-size:13px;color:#888'>Sprzedaż #" + str(sid) + "</div>"
+            "<div style='font-size:18px;font-weight:700'>" + str(sp["ilosc"]) + " szt. × " + str(sp["cena_szt"]) + " zł</div>"
+            "<div style='font-size:15px;color:#3B6D11;font-weight:600'>= " + str(round(kwota_sp,2)) + " zł</div></div>"
+            "<div style='text-align:right'>"
+            "<div style='font-size:12px;color:#888'>Saldo klienta</div>"
+            "<div style='font-size:22px;font-weight:700;color:" + s_kol + "'>" + s_txt + "</div>"
+            "</div></div>"
+            "<hr style='border:none;border-top:1px solid #f0ede4;margin:10px 0'>"
+            "<form method='POST'>"
+            "<label style='font-size:12px;color:#888'>Kwota wpłaty (zł)</label>"
+            "<input name='kwota' type='number' step='0.01' min='0' value='" + (str(round(saldo,2)) if saldo > 0.01 else "") + "'"
+            " style='font-size:22px;text-align:center;font-weight:700;margin-bottom:8px'>"
+            "<div style='display:flex;gap:8px;flex-direction:column'>"
+            "<button name='action' value='wplata' class='btn bg' style='padding:12px;font-size:15px'>✓ Zapisz wpłatę</button>"
+            + ("<button name='action' value='rozlicz0' class='btn bp' style='padding:10px' formnovalidate>"
+               "<input type='hidden' name='rozlicz0' value='1'>Rozlicz do zera (" + str(round(saldo,2)) + " zł)</button>" if saldo > 0.01 else "")
+            + "<a href='/sprzedaz' class='btn bo' style='padding:10px;text-align:center'>Pomiń → wróć do sprzedaży</a>"
+            "</div></form></div>"
+        )
+        return R(html, "zam")
+
+
     @app.route("/sprzedaz/edytuj/<int:sid>", methods=["GET", "POST"])
     @farm_required
     def sprzedaz_edytuj(sid):

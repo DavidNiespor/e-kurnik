@@ -879,12 +879,14 @@ def dashboard():
         + '<style>.dg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px}'
         '@media(max-width:480px){.dg{grid-template-columns:repeat(2,1fr)}}</style>'
         + '<div class="dg">'
-        + '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7d</div><div class="s">' + str(kur) + ' niosek</div></div>'
-        + '<div class="card stat"><div class="v">' + str(zebrane_7d) + '</div><div class="l">Zebrane 7d</div><div class="s">szt.</div></div>'
-        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(sprzedane_mies_szt) + '</div><div class="l">Sprzedane mies.</div><div class="s">szt.</div></div>'
-        + '<div class="card stat"><div class="v" style="color:#3B6D11">' + str(round(zysk,2)) + ' zł</div><div class="l">Zarobek mies.</div><div class="s">wyd: ' + str(round(float(wyd),0)) + ' zł</div></div>'
-        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan > 0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">rez. ' + str(int(zarez)) + ' szt.</div><div class="s" style="color:' + ('#3B6D11' if mag_stan-int(zarez) > 0 else '#A32D2D') + ';font-weight:600">dost. ' + str(max(0,mag_stan-int(zarez))) + ' szt.</div></div>'
-        + ('<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if pasza_dni > 0 and pasza_dni < 7 else '#BA7517' if pasza_dni < 14 else '#3B6D11') + '">' + str(pasza_dni) + 'd</div><div class="l">Pasza zostanie</div><div class="s">' + str(round(pasza_stan,1)) + ' kg</div></div>' if pasza_stan > 0 else '')
+        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if mag_stan>0 else '#888') + '">' + str(mag_stan) + '</div><div class="l">W magazynie</div><div class="s">szt. łącznie</div></div>'
+        + '<div class="card stat"><div class="v" style="color:#BA7517">' + str(int(zarez)) + '</div><div class="l">Zamówione</div><div class="s">szt. do wysyłki</div></div>'
+        + '<div class="card stat"><div class="v" style="color:' + ('#3B6D11' if max(0,mag_stan-int(zarez))>0 else '#A32D2D') + '">' + str(max(0,mag_stan-int(zarez))) + '</div><div class="l">Dostępne</div><div class="s">do sprzedaży</div></div>'
+        + '<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if nies<70 else '#3B6D11') + '">' + str(nies) + '%</div><div class="l">Nieśność 7d</div><div class="s">' + str(kur) + ' szt.</div></div>'
+        + '<div class="card stat" style="cursor:pointer" onclick="document.getElementById(\'zb-d\').focus()">'
+        + '<div class="v" style="color:#534AB7">' + (str(dzis["jaja_zebrane"]) if dzis else '—') + '</div>'
+        + '<div class="l">Zebrane dziś</div><div class="s">klik = edytuj</div></div>'
+        + ('<div class="card stat"><div class="v" style="color:' + ('#A32D2D' if 0<pasza_dni<7 else '#BA7517' if pasza_dni<14 else '#3B6D11') + '">' + str(pasza_dni) + 'd</div><div class="l">Pasza zostanie</div><div class="s">' + str(round(pasza_stan,1)) + ' kg</div></div>' if pasza_stan > 0 else '')
         + '</div>'
         + (sterowanie_html if _pokaz("pokaz_sterowanie") else "")
         + (_kafelki_czynnosci(g) if _pokaz("pokaz_czynnosci") else "")
@@ -949,7 +951,7 @@ def dashboard():
             "<div style='font-size:11px;color:#888'>" + date.today().strftime("%d.%m.%Y") + "</div>"
             "</div>"
             "<div style='display:flex;align-items:center;gap:8px'>"
-            "<input name='jaja_zebrane' type='number' min='0' value='" + (str(dzis["jaja_zebrane"]) if dzis else "") + "'"
+            "<input name='jaja_zebrane' type='number' min='0' id='zb-d' value='" + (str(dzis["jaja_zebrane"]) if dzis else "") + "'"
             " placeholder='0' style='font-size:18px;text-align:center;width:72px;padding:4px' required>"
             "<input name='data' type='hidden' value='" + date.today().isoformat() + "'>"
             "<button class='btn bg bsm' style='white-space:nowrap'>✓ Zapisz</button>"
@@ -1467,11 +1469,20 @@ def zamowienie_status(zid, status):
                 db.execute(
                     "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
                     (g, kid, "sprzedaz", kwota, str(ilosc) + " szt. zamowienie #" + str(zid), nowe))
-            flash("Dostarczone: " + str(ilosc) + " szt. = " + str(kwota) + " zl — wpisano do sprzedazy")
+            flash_msg = "Dostarczone: " + str(ilosc) + " szt. = " + str(kwota) + " zl — wpisano do sprzedazy"
         else:
             flash("Status: " + status)
         db.commit()
     db.close()
+    # Po dostarczeniu z klientem — pokaz ekran rozliczenia
+    if status == "dostarczone" and row and row["klient_id"]:
+        db2 = get_db()
+        sid = db2.execute("SELECT id FROM sprzedaz_szczegol WHERE zamowienie_id=? ORDER BY id DESC LIMIT 1", (zid,)).fetchone()
+        db2.close()
+        if sid:
+            flash(flash_msg if 'flash_msg' in dir() else "Dostarczone")
+            return redirect("/sprzedaz/rozlicz/" + str(sid["id"]))
+    if 'flash_msg' in dir(): flash(flash_msg)
     return redirect(request.referrer or "/zamowienia")
 
 # Klienci przeniesione do produkcja_views.py
