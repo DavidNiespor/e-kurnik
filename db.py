@@ -4,6 +4,19 @@ import sqlite3, os
 _data_dir = os.environ.get("FERMA_DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(_data_dir, "ferma.db")
 
+
+def _migrate(db):
+    """Migracje schematu."""
+    for col, typ, default in [
+        ("cykl_dni", "INTEGER", "0"),
+        ("cykl_aktywne", "INTEGER", "0"),
+    ]:
+        try:
+            db.execute(f"ALTER TABLE zamowienia ADD COLUMN {col} {typ} DEFAULT {default}")
+            db.commit()
+        except Exception:
+            pass
+
 def get_db():
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
@@ -112,7 +125,9 @@ def init_db():
         cena_za_szt REAL DEFAULT 0,
         status TEXT DEFAULT 'nowe',
         platnosc_typ TEXT DEFAULT 'gotowka',
-        uwagi TEXT
+        uwagi TEXT,
+        cykl_dni INTEGER DEFAULT 0,
+        cykl_aktywne INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS konta_saldo (
         klient_id INTEGER PRIMARY KEY REFERENCES klienci(id) ON DELETE CASCADE,

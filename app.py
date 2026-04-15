@@ -1316,7 +1316,9 @@ def zamowienia():
         '<td>' + (r["kn"] or "—") + '</td>'
         '<td style="font-weight:500">' + str(r["ilosc"]) + ' szt.</td>'
         '<td>' + str(round(r["ilosc"]*(r["cena_za_szt"] or 0),2)) + ' zł</td>'
-        '<td><span class="badge ' + sbdg.get(r["status"],"b-gray") + '">' + r["status"] + '</span></td>'
+        '<td><span class="badge ' + sbdg.get(r["status"],"b-gray") + '">' + r["status"] + '</span>'
+        + (' <span class="badge b-blue" title="co ' + str(r["cykl_dni"]) + ' dni">🔄</span>' if (r["cykl_aktywne"] if "cykl_aktywne" in r.keys() else 0) else '')
+        + '</td>'
         '<td class="nowrap">'
         '<a href="/zamowienia/' + str(r["id"]) + '/status/dostarczone" class="btn bg bsm">Dostarczone</a> '
         '<a href="/zamowienia/' + str(r["id"]) + '/edytuj" class="btn bo bsm">Edytuj</a> '
@@ -1354,41 +1356,82 @@ def zamowienie_edytuj(zid):
     row = db.execute("SELECT * FROM zamowienia WHERE id=? AND gospodarstwo_id=?", (zid,g)).fetchone()
     if not row: db.close(); return redirect("/zamowienia")
     if request.method == "POST":
-        db.execute(
-            "UPDATE zamowienia SET klient_id=?,data_dostawy=?,ilosc=?,cena_za_szt=?,uwagi=?,status=? WHERE id=? AND gospodarstwo_id=?",
-            (request.form.get("klient_id") or None,
-             request.form.get("data_dostawy"),
-             int(request.form.get("ilosc") or 0),
-             float(request.form.get("cena_za_szt") or 0),
-             request.form.get("uwagi",""),
-             request.form.get("status","nowe"),
-             zid, g))
+        cykl_dni = int(request.form.get("cykl_dni", 0) or 0)
+        cykl_akt = 1 if (request.form.get("cykl_aktywne") and cykl_dni > 0) else 0
+        try:
+            db.execute(
+                "UPDATE zamowienia SET klient_id=?,data_dostawy=?,ilosc=?,cena_za_szt=?,uwagi=?,status=?,cykl_dni=?,cykl_aktywne=? WHERE id=? AND gospodarstwo_id=?",
+                (request.form.get("klient_id") or None,
+                 request.form.get("data_dostawy"),
+                 int(request.form.get("ilosc") or 0),
+                 float(request.form.get("cena_za_szt") or 0),
+                 request.form.get("uwagi",""),
+                 request.form.get("status","nowe"),
+                 cykl_dni, cykl_akt,
+                 zid, g))
+        except Exception:
+            # Fallback bez cykl jesli kolumny nie istnieja
+            db.execute(
+                "UPDATE zamowienia SET klient_id=?,data_dostawy=?,ilosc=?,cena_za_szt=?,uwagi=?,status=? WHERE id=? AND gospodarstwo_id=?",
+                (request.form.get("klient_id") or None,
+                 request.form.get("data_dostawy"),
+                 int(request.form.get("ilosc") or 0),
+                 float(request.form.get("cena_za_szt") or 0),
+                 request.form.get("uwagi",""),
+                 request.form.get("status","nowe"),
+                 zid, g))
         db.commit(); db.close()
         flash("Zamowienie zaktualizowane.")
         return redirect("/zamowienia")
-    klienci = db.execute("SELECT id,nazwa FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
+    klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     db.close()
+    kc_map = {str(k["id"]): float(k["cena_indyw"] or 0) for k in klienci}
     opt = "".join(
-        '<option value="' + str(k["id"]) + '"' + (' selected' if row["klient_id"]==k["id"] else '') + '>' + k["nazwa"] + '</option>'
+        '<option value="' + str(k["id"]) + '"' + (' selected' if row["klient_id"]==k["id"] else '') + '>'
+        + k["nazwa"] + ("(" + str(k["cena_indyw"]) + " zl)" if k["cena_indyw"] else "") + '</option>'
         for k in klienci)
     stat_opt = "".join(
         '<option value="' + s + '"' + (' selected' if row["status"]==s else '') + '>' + s + '</option>'
         for s in ["nowe","potwierdzone","dostarczone","anulowane"])
+    try:
+        cykl_dni_val = int(row["cykl_dni"] or 0)
+        cykl_akt_val = int(row["cykl_aktywne"] or 0)
+    except Exception:
+        cykl_dni_val = 0; cykl_akt_val = 0
     html = (
         '<h1>Edycja zamowienia #' + str(zid) + '</h1><div class="card"><form method="POST">'
         '<label>Klient</label>'
-        '<select name="klient_id"><option value="">— wybierz —</option>' + opt + '</select>'
+        '<select name="klient_id" id="zk" onchange="autoC()">'
+        '<option value="">— wybierz —</option>' + opt + '</select>'
         '<div class="g2">'
         '<div><label>Data dostawy</label><input name="data_dostawy" type="date" value="' + (row["data_dostawy"] or "") + '"></div>'
         '<div><label>Ilosc jaj</label><input name="ilosc" type="number" min="1" value="' + str(row["ilosc"]) + '"></div>'
         '</div>'
         '<div class="g2">'
-        '<div><label>Cena/szt (zl)</label><input name="cena_za_szt" type="number" step="0.01" value="' + str(row["cena_za_szt"] or "") + '"></div>'
+        '<div><label>Cena/szt (zl)</label><input name="cena_za_szt" id="zc" type="number" step="0.01" value="' + str(row["cena_za_szt"] or "") + '"></div>'
         '<div><label>Status</label><select name="status">' + stat_opt + '</select></div>'
         '</div>'
         '<label>Uwagi</label><input name="uwagi" value="' + (row["uwagi"] or "") + '">'
+        '<div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-top:10px">'
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">'
+        '<input type="checkbox" name="cykl_aktywne" id="ch-cykl"'
+        + (' checked' if cykl_akt_val else '') +
+        ' onchange="document.getElementById(\'cykl-box\').style.display=this.checked?\'block\':\'none\'" style="width:16px;height:16px">'
+        '<b>Zamowienie cykliczne</b></label>'
+        '<div id="cykl-box" style="' + ('display:block' if cykl_akt_val else 'display:none') + ';margin-top:8px">'
+        '<label style="font-size:12px;color:#888">Powtarzaj co ile dni</label>'
+        '<div style="display:flex;align-items:center;gap:8px">'
+        '<input name="cykl_dni" type="number" min="1" max="365" value="' + (str(cykl_dni_val) if cykl_dni_val else "") + '"'
+        ' placeholder="np. 7" style="width:100px;font-size:16px;text-align:center">'
+        '<span style="font-size:13px;color:#888">dni</span>'
+        '</div></div></div>'
         '<br><button class="btn bp">Zapisz</button>'
         '<a href="/zamowienia" class="btn bo" style="margin-left:8px">Anuluj</a>'
+        '<script>'
+        "var _kc=" + str(kc_map).replace("'",'"') + ";"
+        "function autoC(){var v=document.getElementById('zk').value;"
+        "var c=_kc[v]||0;if(c>0)document.getElementById('zc').value=c.toFixed(2);}"
+        '</script>'
         '</form></div>'
     )
     return R(html, "zam")
@@ -1400,31 +1443,56 @@ def zamowienia_dodaj():
     g = gid()
     if request.method == "POST":
         db = get_db()
-        db.execute("INSERT INTO zamowienia(gospodarstwo_id,klient_id,data_zlozenia,data_dostawy,ilosc,cena_za_szt,uwagi) VALUES(?,?,?,?,?,?,?)",
+        cykl_dni = int(request.form.get("cykl_dni", 0) or 0)
+        cykl_akt = 1 if (request.form.get("cykl_aktywne") and cykl_dni > 0) else 0
+        db.execute(
+            "INSERT INTO zamowienia(gospodarstwo_id,klient_id,data_zlozenia,data_dostawy,ilosc,cena_za_szt,uwagi,cykl_dni,cykl_aktywne)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
             (g, request.form.get("klient_id") or None, date.today().isoformat(),
-             request.form.get("data_dostawy"), request.form.get("ilosc",0),
-             request.form.get("cena_za_szt",0), request.form.get("uwagi","")))
+             request.form.get("data_dostawy"), int(request.form.get("ilosc",0) or 0),
+             float(request.form.get("cena_za_szt",0) or 0),
+             request.form.get("uwagi",""), cykl_dni, cykl_akt))
         db.commit(); db.close()
-        flash("Zamówienie dodane.")
+        flash("Zamówienie dodane." + (" Cykliczne co " + str(cykl_dni) + " dni." if cykl_akt else ""))
         return redirect("/zamowienia")
     db = get_db()
     klienci = db.execute("SELECT id,nazwa,cena_indyw FROM klienci WHERE gospodarstwo_id=? ORDER BY nazwa", (g,)).fetchall()
     db.close()
-    opt = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"] + '</option>' for k in klienci)
+    kc_map = {str(k["id"]): float(k["cena_indyw"] or 0) for k in klienci}
+    opt = "".join('<option value="' + str(k["id"]) + '">' + k["nazwa"]
+        + (" (" + str(k["cena_indyw"]) + " zl/szt)" if k["cena_indyw"] else "") + '</option>'
+        for k in klienci)
     html = (
         '<h1>Nowe zamówienie</h1><div class="card"><form method="POST">'
-        '<label>Klient</label><select name="klient_id"><option value="">— wybierz —</option>' + opt + '</select>'
+        '<label>Klient</label>'
+        '<select name="klient_id" id="zk" onchange="autoC()">'
+        '<option value="">— wybierz —</option>' + opt + '</select>'
         '<a href="/klienci/dodaj" style="font-size:12px;color:#534AB7;display:block;margin-top:4px">+ nowy klient</a>'
         '<div class="g2">'
         '<div><label>Data dostawy</label><input name="data_dostawy" type="date" value="' + (date.today()+timedelta(days=1)).isoformat() + '"></div>'
         '<div><label>Ilość jaj</label><input name="ilosc" type="number" min="1"></div>'
         '</div>'
         '<div class="g2">'
-        '<div><label>Cena/szt (zł)</label><input name="cena_za_szt" type="number" step="0.01"></div>'
+        '<div><label>Cena/szt (zł)</label><input name="cena_za_szt" id="zc" type="number" step="0.01" placeholder="auto z klienta"></div>'
         '<div><label>Uwagi</label><input name="uwagi"></div>'
         '</div>'
+        '<div style="background:#f5f5f0;border-radius:8px;padding:10px;margin-top:10px">'
+        '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">'
+        '<input type="checkbox" name="cykl_aktywne" id="ch-cykl" onchange="document.getElementById(\'cykl-box\').style.display=this.checked?\'block\':\'none\'" style="width:16px;height:16px">'
+        '<b>Zamówienie cykliczne</b></label>'
+        '<div id="cykl-box" style="display:none;margin-top:8px">'
+        '<label style="font-size:12px;color:#888">Powtarzaj co ile dni</label>'
+        '<div style="display:flex;align-items:center;gap:8px">'
+        '<input name="cykl_dni" type="number" min="1" max="365" placeholder="np. 7" style="width:100px;font-size:16px;text-align:center">'
+        '<span style="font-size:13px;color:#888">dni (po dostarczeniu automatycznie tworzy kolejne)</span>'
+        '</div></div></div>'
         '<br><button class="btn bp">Zapisz</button>'
         '<a href="/zamowienia" class="btn bo" style="margin-left:8px">Anuluj</a>'
+        '<script>'
+        "var _kc=" + str(kc_map).replace("'",'"') + ";"
+        "function autoC(){var v=document.getElementById('zk').value;"
+        "var c=_kc[v]||0;if(c>0)document.getElementById('zc').value=c.toFixed(2);}"
+        '</script>'
         '</form></div>'
     )
     return R(html, "zam")
@@ -1470,6 +1538,21 @@ def zamowienie_status(zid, status):
                     "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
                     (g, kid, "sprzedaz", kwota, str(ilosc) + " szt. zamowienie #" + str(zid), nowe))
             flash_msg = "Dostarczone: " + str(ilosc) + " szt. = " + str(kwota) + " zl — wpisano do sprzedazy"
+            # Jesli zamowienie cykliczne — stworz kolejne
+            try:
+                cykl_dni = int(row["cykl_dni"] or 0)
+                cykl_akt = int(row["cykl_aktywne"] or 0)
+                if cykl_dni > 0 and cykl_akt:
+                    from datetime import timedelta
+                    nowa_data = (date.fromisoformat(td) + timedelta(days=cykl_dni)).isoformat()
+                    db.execute(
+                        "INSERT INTO zamowienia(gospodarstwo_id,klient_id,data_zlozenia,data_dostawy,ilosc,cena_za_szt,uwagi,cykl_dni,cykl_aktywne)"
+                        " VALUES(?,?,?,?,?,?,?,?,?)",
+                        (g, kid, td, nowa_data, ilosc, row["cena_za_szt"],
+                         row["uwagi"], cykl_dni, cykl_akt))
+                    flash_msg += " | Kolejne cykliczne: " + nowa_data
+            except Exception as e:
+                pass
         else:
             flash("Status: " + status)
         db.commit()
@@ -2875,6 +2958,15 @@ def admin_farm_toggle(fid):
 def startup():
     init_db()
     init_auth()
+    # Migracje schematu
+    try:
+        from db import _migrate, get_db
+        with app.app_context():
+            _db = get_db()
+            _migrate(_db)
+            _db.close()
+    except Exception as e:
+        print(f"Migrate error: {e}")
     try:
         from scheduler import start as _sched_start
         _sched_start()
