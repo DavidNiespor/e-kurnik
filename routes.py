@@ -1264,55 +1264,182 @@ def register_routes(app):
 
 
     # ─── ANALITYKA ───────────────────────────────────────────────────────────
+
     @app.route("/analityka")
     @farm_required
     def analityka():
+        import json as _j
         g=gid(); db=get_db()
-        kur=db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'",(g,)).fetchone()["s"] or 1
-        prod=db.execute("SELECT data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg,ROUND(CAST(jaja_zebrane AS REAL)/?*100,1) as niesnosc FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 90",(kur,g)).fetchall()
-        wyd_kat=db.execute("SELECT kategoria,SUM(wartosc_total) as suma FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY kategoria ORDER BY suma DESC",(g,)).fetchall()
-        mies=db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc) as p FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
-        mies_w=db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc_total) as w FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
+        # Dane podstawowe
+        kur = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'",(g,)).fetchone()["s"] or 1
+        pdz = float(gs("pasza_dzienna_kg","6"))
+        woda_dz = float(gs("woda_dzienna_l","30"))
+        # Produkcja 90 dni
+        prod = db.execute(
+            "SELECT data,jaja_zebrane,jaja_sprzedane,pasza_wydana_kg,"
+            "ROUND(CAST(jaja_zebrane AS REAL)/?*100,1) as niesnosc "
+            "FROM produkcja WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 90",
+            (kur,g)).fetchall()
+        # Woda
+        woda = db.execute(
+            "SELECT data,litry FROM woda_reczna WHERE gospodarstwo_id=? ORDER BY data DESC LIMIT 90",
+            (g,)).fetchall()
+        woda_map = {r["data"]: float(r["litry"] or 0) for r in woda}
+        # Wydatki 12 mies
+        wyd_kat = db.execute("SELECT kategoria,SUM(wartosc_total) as suma FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY kategoria ORDER BY suma DESC",(g,)).fetchall()
+        # Przychody miesięczne
+        mies = db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc) as p FROM sprzedaz_szczegol WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
+        mies_w = db.execute("SELECT strftime('%Y-%m',data) as m,SUM(wartosc_total) as w FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-12 months') GROUP BY m ORDER BY m",(g,)).fetchall()
+        # Predykcja - zuzycie rzeczywiste vs przewidywane
+        pasza_avg30 = float(db.execute(
+            "SELECT COALESCE(AVG(pasza_wydana_kg),?) as a FROM produkcja WHERE gospodarstwo_id=? AND pasza_wydana_kg>0 AND data>=date('now','-30 days')",
+            (pdz,g)).fetchone()["a"])
+        woda_avg30_r = db.execute(
+            "SELECT COALESCE(AVG(litry),?) as a FROM woda_reczna WHERE gospodarstwo_id=? AND data>=date('now','-30 days')",
+            (woda_dz,g)).fetchone()["a"]
+        woda_avg30 = float(woda_avg30_r if woda_avg30_r else woda_dz)
+        # Koszty srednie
+        koszt_avg30 = float(db.execute(
+            "SELECT COALESCE(SUM(wartosc_total)/30,0) as a FROM wydatki WHERE gospodarstwo_id=? AND data>=date('now','-30 days')",
+            (g,)).fetchone()["a"])
+        # Pasza w magazynie
+        pasza_mag = 0.0
+        try: pasza_mag = float(db.execute("SELECT COALESCE(SUM(stan),0) as s FROM stan_magazynu WHERE gospodarstwo_id=?",(g,)).fetchone()["s"] or 0)
+        except Exception: pass
         db.close()
-        prod_r=list(reversed(prod))
-        daty=[r["data"] for r in prod_r]; niesn=[r["niesnosc"] for r in prod_r]
-        zebrane=[r["jaja_zebrane"] for r in prod_r]; pasza=[r["pasza_wydana_kg"] for r in prod_r]
-        wl=[r["kategoria"] for r in wyd_kat]; wv=[round(r["suma"],2) for r in wyd_kat]
-        md={r["m"]:round(r["p"] or 0,2) for r in mies}; wd={r["m"]:round(r["w"] or 0,2) for r in mies_w}
-        all_m=sorted(set(list(md)+list(wd)))
-        pv=[md.get(m,0) for m in all_m]; wv2=[wd.get(m,0) for m in all_m]
-        zv=[round(p-w,2) for p,w in zip(pv,wv2)]
-        _mn=["","Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"]
+
+        prod_r = list(reversed(prod))
+        daty   = [r["data"] for r in prod_r]
+        niesn  = [r["niesnosc"] for r in prod_r]
+        zebrane= [r["jaja_zebrane"] for r in prod_r]
+        pasza  = [r["pasza_wydana_kg"] or 0 for r in prod_r]
+        woda_v = [woda_map.get(r["data"], None) for r in prod_r]
+        wl     = [r["kategoria"] for r in wyd_kat]
+        wv     = [round(r["suma"],2) for r in wyd_kat]
+        md     = {r["m"]: round(r["p"] or 0,2) for r in mies}
+        wd     = {r["m"]: round(r["w"] or 0,2) for r in mies_w}
+        all_m  = sorted(set(list(md)+list(wd)))
+        pv     = [md.get(m,0) for m in all_m]
+        wv2    = [wd.get(m,0) for m in all_m]
+        zv     = [round(p-w,2) for p,w in zip(pv,wv2)]
+        _mn    = ["","Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"]
         def _pm(ym):
             try: y,m=ym.split("-"); return _mn[int(m)]+"'"+y[2:]
             except: return ym
-        ml=[_pm(m) for m in all_m]
-        _kol={"Zboże/pasza":"#534AB7","Witaminy/suplementy":"#1D9E75","Weterynarz":"#D85A30","Wyposażenie":"#BA7517","Prąd/gaz":"#185FA5","Ściółka":"#888780","Inne":"#9a9890"}
-        wc=[_kol.get(l,"#AFA9EC") for l in wl]
-        import json as _j
-        html=('<h1>Wykresy i analityka</h1>'
-            '<div class="card"><b>Nieśność i zebrane jaja — ostatnie 90 dni</b><canvas id="ch1" height="80"></canvas></div>'
-            '<div class="g2"><div class="card"><b>Wydatki wg kategorii — 12 mies.</b><canvas id="ch2" height="160"></canvas></div>'
-            '<div class="card"><b>Przychody vs wydatki — 12 mies.</b><canvas id="ch3" height="160"></canvas></div></div>'
-            '<div class="card"><b>Zużycie paszy — 90 dni (kg)</b><canvas id="ch4" height="70"></canvas></div>'
+        ml  = [_pm(m) for m in all_m]
+        _kol= {"Zboże/pasza":"#534AB7","Witaminy/suplementy":"#1D9E75","Weterynarz":"#D85A30","Wyposażenie":"#BA7517","Prąd/gaz":"#185FA5","Ściółka":"#888780","Inne":"#9a9890"}
+        wc  = [_kol.get(l,"#AFA9EC") for l in wl]
+
+        # Predykcja na 30 dni
+        pas_30_prev   = round(pdz * 30, 1)
+        pas_30_rzecz  = round(pasza_avg30 * 30, 1)
+        wod_30_prev   = round(woda_dz * 30, 1)
+        wod_30_rzecz  = round(woda_avg30 * 30, 1)
+        kos_30_prev   = round(float(gs("budzet_miesiac","0") or 0), 2)
+        kos_30_rzecz  = round(koszt_avg30 * 30, 2)
+        pas_dni_prev  = int(pasza_mag / pdz) if pdz > 0 and pasza_mag > 0 else 0
+        pas_dni_rzecz = int(pasza_mag / pasza_avg30) if pasza_avg30 > 0 and pasza_mag > 0 else 0
+
+        def pred_row(label, prev, rzecz, unit, extra=""):
+            diff = round(rzecz - prev, 2)
+            kol  = "#A32D2D" if diff > 0 else "#3B6D11" if diff < 0 else "#888"
+            diff_txt = ("+" if diff > 0 else "") + str(diff) + " " + unit
+            return (
+                "<tr>"
+                "<td style='font-weight:500'>" + label + "</td>"
+                "<td style='text-align:right;color:#534AB7'>" + str(prev) + " " + unit + "</td>"
+                "<td style='text-align:right;font-weight:600'>" + str(rzecz) + " " + unit + "</td>"
+                "<td style='text-align:right;color:" + kol + ";font-weight:600'>" + diff_txt + "</td>"
+                "<td style='font-size:12px;color:#888'>" + extra + "</td>"
+                "</tr>"
+            )
+
+        pred_html = (
+            "<div class='card' style='margin-bottom:12px'>"
+            "<b>Predykcja — 30 dni: przewidywana vs rzeczywista</b>"
+            "<div style='overflow-x:auto;margin-top:10px'>"
+            "<table style='font-size:13px;width:100%'><thead><tr>"
+            "<th>Parametr</th><th style='text-align:right'>Przewidywana</th>"
+            "<th style='text-align:right'>Rzeczywista (30d avg)</th>"
+            "<th style='text-align:right'>Różnica</th><th>Uwagi</th>"
+            "</tr></thead><tbody>"
+            + pred_row("Pasza / 30 dni", pas_30_prev, pas_30_rzecz, "kg",
+                ("Magazyn starczy " + str(pas_dni_rzecz) + " dni wg zuż. rzecz." if pas_dni_rzecz > 0 else ""))
+            + pred_row("Woda / 30 dni", wod_30_prev, wod_30_rzecz, "L",
+                ("Magazyn starczy " + str(pas_dni_rzecz) + " dni" if pas_dni_rzecz > 0 else ""))
+            + pred_row("Koszty / 30 dni",
+                kos_30_prev,
+                kos_30_rzecz, "zł",
+                ("vs budżet " + str(kos_30_prev) + " zł" if kos_30_prev > 0 else "Ustaw budżet w ustawieniach"))
+            + "</tbody></table></div>"
+            # Mini kafelki predykcji
+            "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:12px'>"
+            "<div class='card stat' style='background:#f8f4ff'>"
+            "<div class='v' style='color:#534AB7'>" + str(pas_30_rzecz) + " kg</div>"
+            "<div class='l'>Pasza / 30d (rzecz.)</div>"
+            "<div class='s'>" + str(round(pasza_avg30,2)) + " kg/dzień</div></div>"
+            "<div class='card stat' style='background:#f4f8ff'>"
+            "<div class='v' style='color:#185FA5'>" + str(wod_30_rzecz) + " L</div>"
+            "<div class='l'>Woda / 30d (rzecz.)</div>"
+            "<div class='s'>" + str(round(woda_avg30,1)) + " L/dzień</div></div>"
+            + ("<div class='card stat' style='background:#fff4f0'>"
+               "<div class='v' style='color:#D85A30'>" + str(kos_30_rzecz) + " zł</div>"
+               "<div class='l'>Koszty / 30d (rzecz.)</div>"
+               "<div class='s'>" + str(round(koszt_avg30,2)) + " zł/dzień</div></div>" if koszt_avg30 > 0 else "")
+            + ("<div class='card stat' style='background:#f4faf0'>"
+               "<div class='v' style='color:#1D9E75'>" + str(pas_dni_rzecz) + " dni</div>"
+               "<div class='l'>Pasza starczy</div>"
+               "<div class='s'>wg zuż. rzecz.</div></div>" if pas_dni_rzecz > 0 else "")
+            + "</div></div>"
+        )
+
+        html = (
+            '<h1>Analityka</h1>'
+            + pred_html
+            + '<div class="card" style="margin-bottom:12px"><b>Nieśność i zebrane jaja — ostatnie 90 dni</b>'
+            '<canvas id="ch1" height="80"></canvas></div>'
+            '<div class="g2"><div class="card"><b>Wydatki wg kategorii — 12 mies.</b>'
+            '<canvas id="ch2" height="160"></canvas></div>'
+            '<div class="card"><b>Przychody vs wydatki — 12 mies.</b>'
+            '<canvas id="ch3" height="160"></canvas></div></div>'
+            '<div class="g2">'
+            '<div class="card"><b>Zużycie paszy — 90 dni (kg)</b><canvas id="ch4" height="100"></canvas></div>'
+            '<div class="card"><b>Zużycie wody — 90 dni (L)</b><canvas id="ch5" height="100"></canvas></div>'
+            '</div>'
             '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script><script>'
-            f'const DATY={_j.dumps(daty)},NIESN={_j.dumps(niesn)},ZEBR={_j.dumps(zebrane)},PASZA={_j.dumps(pasza)};'
+            f'const DATY={_j.dumps(daty)},NIESN={_j.dumps(niesn)},ZEBR={_j.dumps(zebrane)};'
+            f'const PASZA={_j.dumps(pasza)},WODA={_j.dumps(woda_v)};'
+            f'const PASZA_PREV={pdz},WODA_PREV={woda_dz};'
             f'const WL={_j.dumps(wl)},WV={_j.dumps(wv)},WC={_j.dumps(wc)};'
             f'const ML={_j.dumps(ml)},PV={_j.dumps(pv)},WV2={_j.dumps(wv2)},ZV={_j.dumps(zv)};'
             'const F={family:"system-ui,sans-serif",size:12},G={color:"rgba(0,0,0,0.06)"};Chart.defaults.font=F;'
+            # Wykres 1: niesnosc
             'new Chart(document.getElementById("ch1"),{type:"line",data:{labels:DATY,datasets:['
             '{label:"Nieśność %",data:NIESN,borderColor:"#534AB7",backgroundColor:"rgba(83,74,183,0.08)",tension:0.3,pointRadius:2,yAxisID:"y1"},'
             '{label:"Zebrane szt.",data:ZEBR,borderColor:"#1D9E75",backgroundColor:"rgba(29,158,117,0.08)",tension:0.3,pointRadius:2,yAxisID:"y2"}]},'
             'options:{responsive:true,interaction:{mode:"index"},scales:{y1:{position:"left",grid:G},y2:{position:"right",grid:{drawOnChartArea:false}}},plugins:{legend:{labels:{font:F}}}}});'
+            # Wykres 2: wydatki
             'new Chart(document.getElementById("ch2"),{type:"doughnut",data:{labels:WL,datasets:[{data:WV,backgroundColor:WC,borderWidth:2}]},options:{responsive:true,plugins:{legend:{position:"right",labels:{font:F,boxWidth:12}}}}});'
+            # Wykres 3: przychody
             'new Chart(document.getElementById("ch3"),{type:"bar",data:{labels:ML,datasets:['
             '{label:"Przychód",data:PV,backgroundColor:"rgba(29,158,117,0.7)"},'
             '{label:"Wydatki",data:WV2,backgroundColor:"rgba(216,90,48,0.7)"},'
             '{label:"Zysk",data:ZV,type:"line",borderColor:"#534AB7",tension:0.3,pointRadius:3}]},'
             'options:{responsive:true,scales:{y:{grid:G}},plugins:{legend:{labels:{font:F}}}}});'
-            'new Chart(document.getElementById("ch4"),{type:"bar",data:{labels:DATY,datasets:[{label:"Pasza (kg)",data:PASZA,backgroundColor:"rgba(186,117,23,0.6)",borderRadius:3}]},options:{responsive:true,scales:{y:{grid:G}},plugins:{legend:{labels:{font:F}}}}});'
-            '</script>')
+            # Wykres 4: pasza - rzeczywiste vs przewidywane
+            'new Chart(document.getElementById("ch4"),{type:"bar",data:{labels:DATY,datasets:['
+            '{label:"Pasza rzecz. (kg)",data:PASZA,backgroundColor:"rgba(186,117,23,0.6)",borderRadius:3},'
+            '{label:"Przewidywane "+PASZA_PREV+" kg",data:DATY.map(()=>PASZA_PREV),type:"line",borderColor:"rgba(186,117,23,0.3)",borderDash:[4,4],pointRadius:0,borderWidth:1.5}]},'
+            'options:{responsive:true,scales:{y:{grid:G}},plugins:{legend:{labels:{font:F}}}}});'
+            # Wykres 5: woda - rzeczywiste vs przewidywane
+            'new Chart(document.getElementById("ch5"),{type:"bar",data:{labels:DATY,datasets:['
+            '{label:"Woda rzecz. (L)",data:WODA,backgroundColor:"rgba(24,95,165,0.5)",borderRadius:3},'
+            '{label:"Przewidywane "+WODA_PREV+" L",data:DATY.map(()=>WODA_PREV),type:"line",borderColor:"rgba(24,95,165,0.3)",borderDash:[4,4],pointRadius:0,borderWidth:1.5}]},'
+            'options:{responsive:true,scales:{y:{grid:G}},plugins:{legend:{labels:{font:F}}}}});'
+            '</script>'
+        )
         return R(html,"ana")
+
 
     # ─── PASZA ROCZNE + ANALITYKA ─────────────────────────────────────────────
     @app.route("/pasza/receptura/<int:rid>/sezon-form", methods=["GET","POST"])
