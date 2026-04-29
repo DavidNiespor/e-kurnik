@@ -6,16 +6,51 @@ DB = os.path.join(_data_dir, "ferma.db")
 
 
 def _migrate(db):
-    """Migracje schematu."""
-    for col, typ, default in [
-        ("cykl_dni", "INTEGER", "0"),
-        ("cykl_aktywne", "INTEGER", "0"),
-    ]:
+    """Migracje schematu — bezpieczne ALTER TABLE dla brakujacych kolumn."""
+    # Nowe tabele
+    db.executescript("""
+    CREATE TABLE IF NOT EXISTS inwentaryzacje (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gospodarstwo_id INTEGER NOT NULL REFERENCES gospodarstwa(id) ON DELETE CASCADE,
+        data DATE NOT NULL,
+        stan INTEGER NOT NULL,
+        uwagi TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    db.commit()
+
+    migrations = [
+        # uzytkownicy
+        ("uzytkownicy",      "haslo_hash",     "TEXT",    "NULL"),
+        ("uzytkownicy",      "aktywny",        "INTEGER", "1"),
+        ("uzytkownicy",      "gospodarstwo_id","INTEGER", "NULL"),
+        # tabela, kolumna, typ, default
+        ("zamowienia",       "cykl_dni",       "INTEGER", "0"),
+        ("zamowienia",       "cykl_aktywne",   "INTEGER", "0"),
+        ("zamowienia",       "platnosc_typ",   "TEXT",    "'gotowka'"),
+        ("zamowienia",       "uwagi",          "TEXT",    "NULL"),
+        ("produkcja",        "klient_id",      "INTEGER", "NULL"),
+        ("produkcja",        "typ_sprzedazy",  "TEXT",    "NULL"),
+        ("produkcja",        "uwagi",          "TEXT",    "NULL"),
+        ("sprzedaz_szczegol","klient_id",      "INTEGER", "NULL"),
+        ("sprzedaz_szczegol","zamowienie_id",  "INTEGER", "NULL"),
+        ("sprzedaz_szczegol","typ",            "TEXT",    "'gotowka'"),
+        ("sprzedaz_szczegol","uwagi",          "TEXT",    "NULL"),
+        ("klienci",          "cena_indyw",     "REAL",    "NULL"),
+        ("klienci",          "telefon",        "TEXT",    "NULL"),
+        ("klienci",          "email",          "TEXT",    "NULL"),
+        ("konta_saldo",      "saldo_jaj",      "INTEGER", "0"),
+        ("gospodarstwa",     "opis",           "TEXT",    "NULL"),
+        ("gospodarstwa",     "lat",            "REAL",    "NULL"),
+        ("gospodarstwa",     "lon",            "REAL",    "NULL"),
+    ]
+    for tbl, col, typ, default in migrations:
         try:
-            db.execute(f"ALTER TABLE zamowienia ADD COLUMN {col} {typ} DEFAULT {default}")
+            db.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ} DEFAULT {default}")
             db.commit()
         except Exception:
-            pass
+            pass  # kolumna juz istnieje lub tabela nie istnieje
 
 def get_db():
     db = sqlite3.connect(DB)

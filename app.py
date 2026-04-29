@@ -197,6 +197,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
       <button class="nl {{ 'on' if p=='ana' }}">Analityka <span class="ar">&#9660;</span></button>
       <div class="nd">
         <a href="/analityka" class="{{ 'on' if p=='ana' }}">&#x1F4CA; Wykresy</a>
+        <a href="/analityka/predykcja">&#x1F52E; Predykcja</a>
         <a href="/pasza/analityka">&#x1F9EA; Analiza paszy</a>
         <a href="/pasza/skladniki-baza">&#x1F4DA; Baza sk&#322;adnik&#243;w</a>
       </div>
@@ -303,6 +304,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
     </div>
     <div class="dr-bd">
       <a href="/analityka" class="{{ 'on' if p=='ana' }}" onclick="drClose()">Wykresy</a>
+      <a href="/analityka/predykcja" onclick="drClose()">Predykcja</a>
       <a href="/pasza/analityka" onclick="drClose()">Analiza paszy</a>
       <a href="/pasza/skladniki-baza" onclick="drClose()">Baza sk&#322;adnik&#243;w</a>
     </div>
@@ -2958,13 +2960,12 @@ def admin_farm_toggle(fid):
 def startup():
     init_db()
     init_auth()
-    # Migracje schematu
+    # Migracje schematu — uruchamiamy bezposrednio na pliku bazy
     try:
         from db import _migrate, get_db
-        with app.app_context():
-            _db = get_db()
-            _migrate(_db)
-            _db.close()
+        _db = get_db()
+        _migrate(_db)
+        _db.close()
     except Exception as e:
         print(f"Migrate error: {e}")
     try:
