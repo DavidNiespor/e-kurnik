@@ -86,15 +86,15 @@ def register_sprzedaz(app):
                 from datetime import datetime
                 ks2 = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
                 stare_sal = float(ks2["saldo_pln"] if ks2 else 0)
-                do_zaplaty = round(stare_sal + kwota, 2)
+                # stare_sal juz zawiera dług z tej sprzedazy (dodany wyżej)
+                # Wpłata zmniejsza saldo
                 if rozlicz0:
-                    # Zeruj saldo niezaleznie od reszty/nadplaty
                     nowe_sal = 0.0
-                    if wplata <= 0: wplata = max(0, do_zaplaty)
-                    reszta = round(wplata - do_zaplaty, 2)
+                    if wplata <= 0: wplata = max(0, stare_sal)
+                    reszta = round(wplata - stare_sal, 2)
                 else:
-                    nowe_sal = round(do_zaplaty - wplata, 2)
-                    reszta = round(wplata - do_zaplaty, 2)
+                    nowe_sal = round(stare_sal - wplata, 2)
+                    reszta = round(wplata - stare_sal, 2)
                 if ks2:
                     db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
                 else:
