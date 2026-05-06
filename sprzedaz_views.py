@@ -126,11 +126,14 @@ def register_sprzedaz(app):
         # Filtr dat - priorytet: query param > sesja > biezacy miesiac
         data_od = request.args.get("od", "")
         data_do = request.args.get("do", "")
-        sesja_dat = session.get("zakres_dat", {})
-        if not data_od:
-            data_od = sesja_dat.get("od", date.today().replace(day=1).isoformat())
+        # data_do zawsze = dzis jesli nie podano explicite
         if not data_do:
-            data_do = sesja_dat.get("do", date.today().isoformat())
+            data_do = date.today().isoformat()
+        if not data_od:
+            sesja_dat = session.get("zakres_dat", {})
+            data_od = sesja_dat.get("od", date.today().replace(day=1).isoformat())
+        # Zapisz do sesji
+        session["zakres_dat"] = {"od": data_od, "do": data_do}
 
         db = get_db()
 
@@ -456,23 +459,45 @@ def register_sprzedaz(app):
         zysk_kol = "#3B6D11" if zysk >= 0 else "#A32D2D"
         zysk_txt = ("+" if zysk >= 0 else "") + str(zysk) + " zł"
 
+        dzis_iso = date.today().isoformat()
+        _p7_od   = (date.today() - timedelta(days=6)).isoformat()
+        _p30_od  = (date.today() - timedelta(days=29)).isoformat()
+        _pM_od   = date.today().replace(day=1).isoformat()
+        _prev1   = date.today().replace(day=1) - timedelta(days=1)
+        _pMp_od  = _prev1.replace(day=1).isoformat()
+        _pMp_do  = _prev1.isoformat()
+        _pY_od   = date.today().replace(month=1,day=1).isoformat()
+
+        def _preset(label, od, do):
+            active = ";font-weight:700;color:#534AB7;border-color:#534AB7" if data_od==od and data_do==do else ""
+            return "<a href='/sprzedaz?od=" + od + "&do=" + do + "' class='btn bo bsm' style='font-size:11px" + active + "'>" + label + "</a>"
+
         s_filtr = (
             "<div class='card' style='margin-bottom:8px'>"
-            "<form method='GET' action='/sprzedaz' style='display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end'>"
-            "<div><label style='font-size:12px'>Od</label>"
+            "<form method='GET' action='/sprzedaz' style='display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px'>"
+            "<div><label style='font-size:11px;color:#888'>Od</label>"
             "<input name='od' type='date' value='" + data_od + "' style='font-size:13px'></div>"
-            "<div><label style='font-size:12px'>Do</label>"
+            "<div><label style='font-size:11px;color:#888'>Do</label>"
             "<input name='do' type='date' value='" + data_do + "' style='font-size:13px'></div>"
-            "<button class='btn bo bsm'>Filtruj</button>"
-            "<a href='/sprzedaz' class='btn bo bsm'>Reset</a>"
+            "<button class='btn bp bsm'>Filtruj</button>"
             "</form>"
-            "<div style='display:flex;gap:16px;margin-top:10px;flex-wrap:wrap'>"
+            "<div style='display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px'>"
+            + _preset("Dziś", dzis_iso, dzis_iso)
+            + _preset("7 dni", _p7_od, dzis_iso)
+            + _preset("30 dni", _p30_od, dzis_iso)
+            + _preset("Ten mies.", _pM_od, dzis_iso)
+            + _preset("Poprz. mies.", _pMp_od, _pMp_do)
+            + _preset("Ten rok", _pY_od, dzis_iso)
+            + "<a href='/sprzedaz' class='btn bo bsm' style='font-size:11px'>Reset</a>"
+            + "</div>"
+            "<div style='display:flex;gap:16px;flex-wrap:wrap;align-items:center'>"
             "<div style='font-size:13px'>Sprzedano: <b style='color:#3B6D11'>" + str(int(stat_zakres["szt"])) + " szt.</b></div>"
             "<div style='font-size:13px'>Przychód: <b style='color:#3B6D11'>" + str(przychod) + " zł</b></div>"
             "<div style='font-size:13px'>Koszty: <b style='color:#A32D2D'>" + str(koszty) + " zł</b></div>"
             "<div style='font-size:13px;font-weight:600'>Zysk/strata: <b style='color:" + zysk_kol + "'>" + zysk_txt + "</b></div>"
-            "</div>"
-            "</div>"
+            "<a href='/sprzedaz/eksport?od=" + data_od + "&do=" + data_do + "' class='btn bo bsm' style='margin-left:auto;font-size:11px'>⬇ CSV</a>"
+            "<a href='/sprzedaz/sheets-sync?od=" + data_od + "&do=" + data_do + "' class='btn bo bsm' style='font-size:11px'>📊 Sheets</a>"
+            "</div></div>"
         )
 
         # ─── 5. HISTORIA SPRZEDAŻY ────────────────────────────────────────
@@ -851,6 +876,102 @@ def register_sprzedaz(app):
             "</div>"
         )
         return R(html, "zam")
+
+    @app.route("/sprzedaz/eksport")
+    @farm_required
+    def sprzedaz_eksport():
+        """Eksport historii sprzedaży do CSV."""
+        from flask import make_response
+        import csv, io
+        g = gid(); db = get_db()
+        od = request.args.get("od", date.today().replace(day=1).isoformat())
+        do = request.args.get("do", date.today().isoformat())
+        rows = db.execute("""
+            SELECT s.data, k.nazwa as klient, s.ilosc, s.cena_szt, s.wartosc, s.typ, s.uwagi
+            FROM sprzedaz_szczegol s
+            LEFT JOIN klienci k ON k.id=s.klient_id
+            WHERE s.gospodarstwo_id=? AND s.data>=? AND s.data<=?
+            ORDER BY s.data DESC, s.id DESC
+        """, (g, od, do)).fetchall()
+        db.close()
+
+        out = io.StringIO()
+        w = csv.writer(out, delimiter=';')
+        w.writerow(["Data","Klient","Ilosc","Cena/szt","Wartosc","Typ","Uwagi"])
+        for r in rows:
+            w.writerow([r["data"], r["klient"] or "anonimowa", r["ilosc"],
+                        str(r["cena_szt"]).replace(".",","),
+                        str(r["wartosc"]).replace(".",","),
+                        r["typ"] or "", r["uwagi"] or ""])
+        resp = make_response(out.getvalue())
+        resp.headers["Content-Type"] = "text/csv; charset=utf-8-sig"
+        resp.headers["Content-Disposition"] = f"attachment; filename=sprzedaz_{od}_{do}.csv"
+        return resp
+
+    @app.route("/sprzedaz/sheets-sync")
+    @farm_required
+    def sprzedaz_sheets_sync():
+        """Synchronizacja danych do Google Sheets."""
+        g = gid(); db = get_db()
+        od = request.args.get("od", date.today().replace(day=1).isoformat())
+        do = request.args.get("do", date.today().isoformat())
+        gs_creds  = get_setting(db, "gdrive_creds",  g)
+        sheet_id  = get_setting(db, "sheets_id",     g)
+
+        if not gs_creds or not sheet_id:
+            db.close()
+            flash("Skonfiguruj Google Sheets w Ustawienia → Backup / Sheets")
+            return redirect("/sprzedaz?od=" + od + "&do=" + do)
+
+        # Pobierz dane do synchronizacji
+        sprzedaz = db.execute("""
+            SELECT s.data, k.nazwa as klient, s.ilosc, s.cena_szt, s.wartosc, s.typ, s.uwagi
+            FROM sprzedaz_szczegol s LEFT JOIN klienci k ON k.id=s.klient_id
+            WHERE s.gospodarstwo_id=? AND s.data>=? AND s.data<=?
+            ORDER BY s.data, s.id
+        """, (g, od, do)).fetchall()
+        produkcja = db.execute(
+            "SELECT data, jaja_zebrane, jaja_sprzedane, pasza_wydana_kg FROM produkcja "
+            "WHERE gospodarstwo_id=? AND data>=? AND data<=? ORDER BY data",
+            (g, od, do)).fetchall()
+        db.close()
+
+        try:
+            import json, base64, urllib.request, urllib.parse
+
+            creds = json.loads(gs_creds)
+            # Uzyj service account token
+            import google_auth
+            token = google_auth.get_token(creds)
+
+            headers = {"Authorization": "Bearer " + token,
+                       "Content-Type": "application/json"}
+
+            def sheets_clear_and_write(sheet_name, header, rows_data):
+                url_clear = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{urllib.parse.quote(sheet_name)}!A1:Z10000:clear"
+                req = urllib.request.Request(url_clear, data=b'{}', headers=headers, method='POST')
+                urllib.request.urlopen(req)
+                values = [header] + [[str(v) if v is not None else "" for v in row] for row in rows_data]
+                body = json.dumps({"values": values, "majorDimension": "ROWS"}).encode()
+                url_write = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{urllib.parse.quote(sheet_name)}!A1?valueInputOption=USER_ENTERED"
+                req2 = urllib.request.Request(url_write, data=body, headers=headers, method='PUT')
+                urllib.request.urlopen(req2)
+
+            sheets_clear_and_write("Sprzedaz",
+                ["Data","Klient","Ilosc","Cena/szt","Wartosc","Typ","Uwagi"],
+                [[r["data"],r["klient"] or "anonimowa",r["ilosc"],r["cena_szt"],r["wartosc"],r["typ"],r["uwagi"]] for r in sprzedaz])
+
+            sheets_clear_and_write("Produkcja",
+                ["Data","Zebrane","Sprzedane","Pasza kg"],
+                [[r["data"],r["jaja_zebrane"],r["jaja_sprzedane"],r["pasza_wydana_kg"]] for r in produkcja])
+
+            flash("Zsynchronizowano " + str(len(sprzedaz)) + " wpisów sprzedaży i " + str(len(produkcja)) + " dni produkcji z Google Sheets ✓")
+        except ImportError:
+            flash("Brak biblioteki google-auth. Użyj eksportu CSV.")
+        except Exception as e:
+            flash("Błąd synchronizacji: " + str(e))
+
+        return redirect("/sprzedaz?od=" + od + "&do=" + do)
 
     @app.route("/sprzedaz/edytuj/<int:sid>", methods=["GET", "POST"])
     @farm_required

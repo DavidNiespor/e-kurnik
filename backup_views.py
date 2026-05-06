@@ -103,6 +103,10 @@ def register_backup(app):
                              request.form.get("folder_id", "").strip(), g)
                 save_setting("gdrive_credentials",
                              request.form.get("creds", "").strip(), g)
+                save_setting("gdrive_creds",
+                             request.form.get("creds", "").strip(), g)
+                save_setting("sheets_id",
+                             request.form.get("sheets_id", "").strip(), g)
                 flash("Konfiguracja zapisana.")
                 return redirect("/backup/gdrive")
             if action == "backup_now":
@@ -112,6 +116,7 @@ def register_backup(app):
                 return redirect("/backup/gdrive")
 
         folder_id = gs("gdrive_folder_id", "")
+        sheets_id = gs("sheets_id", "")
         has_creds = bool(gs("gdrive_credentials", ""))
         last_bkp = gs("gdrive_last_backup", "")
 
@@ -146,9 +151,12 @@ def register_backup(app):
             + "<div class='card'><b>Konfiguracja</b>"
             "<form method='POST' style='margin-top:10px'>"
             "<input type='hidden' name='action' value='save_config'>"
-            "<label>Folder ID</label>"
+            "<label>Folder ID (backup .db)</label>"
             "<input name='folder_id' value='" + folder_id + "'"
             " placeholder='ID z URL folderu na Drive'>"
+            "<label>Google Sheets ID (synchronizacja danych)</label>"
+            "<input name='sheets_id' value='" + sheets_id + "'"
+            " placeholder='ID arkusza z URL: /spreadsheets/d/TUTAJ/edit'>"
             "<label>Service Account JSON</label>"
             "<textarea name='creds' rows='5'"
             " placeholder='{\"type\":\"service_account\",...}'"
