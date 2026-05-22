@@ -753,7 +753,6 @@ def register_sprzedaz(app):
 
         return R(html, "zam")
 
-    # ── Edycja transakcji sprzedaży (po id) ─────────────────────────────
     @app.route("/sprzedaz/rozlicz/<int:sid>", methods=["GET","POST"])
     @farm_required
     def sprzedaz_rozlicz(sid):
@@ -767,111 +766,107 @@ def register_sprzedaz(app):
             db.close(); return redirect("/sprzedaz")
 
         kid = sp["klient_id"]
-        ks = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
-        saldo = float(ks["saldo_pln"] if ks else 0)
-        kwota_sp = float(sp["wartosc"] or 0)
+        ks  = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
+        saldo     = float(ks["saldo_pln"] if ks else 0)
+        kwota_sp  = float(sp["wartosc"] or 0)
 
         if request.method == "POST":
-            typ_pl   = request.form.get("typ_sprzedazy", "nastepnym_razem")
-            wplata   = float(request.form.get("kwota", 0) or 0)
+            typ_pl  = request.form.get("typ_sprzedazy", "nastepnym_razem")
+            wplata  = float(request.form.get("kwota_wplaty") or 0)
 
-            # Aktualizuj typ w sprzedaz_szczegol
             db.execute("UPDATE sprzedaz_szczegol SET typ=? WHERE id=?", (typ_pl, sid))
 
-            if typ_pl in ("gotowka", "przelew"):
-                # Zaplacone - cofnij dlug jesli byl dodany automatycznie
-                if saldo >= kwota_sp - 0.01 and kwota_sp > 0:
-                    nowe_sal = round(saldo - kwota_sp, 2)
-                    if ks:
-                        db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
-                    else:
-                        db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe_sal))
-                    db.execute("INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
-                        (g, kid, "wplata", -kwota_sp, "Platnosc " + typ_pl + " #"+str(sid), nowe_sal))
+            if typ_pl == "nastepnym_razem":
+                # Zostaje jako dlug — saldo juz zawiera ten dług
                 db.commit(); db.close()
-                flash("Zapisano — platnosc: " + typ_pl + " (" + str(kwota_sp) + " zl)")
+                flash("Zapisano — dług klienta: " + str(round(saldo, 2)) + " zł")
+                return redirect("/sprzedaz")
 
-            elif typ_pl == "nastepnym_razem":
-                # Zostaje jako dlug — juz dodane przy tworzeniu wpisu
-                db.commit(); db.close()
-                flash("Zapisano — do rozliczenia pozniej. Saldo: " + str(round(saldo,2)) + " zl")
+            # Dla wszystkich innych typów — wplata jest tym co faktycznie dał
+            # Moze byc mniej niz kwota_sp (częsciowa), rowna lub wiecej (nadplata)
+            pozostaje = round(kwota_sp - wplata, 2)  # ile jeszcze jest winien z TEJ sprzedazy
+            # Saldo = poprzednie saldo - kwota_sp (cofnij dług auto) + pozostaje
+            # czyli: nowe_sal = saldo - wplata (bo saldo zawiera kwota_sp jako dług)
+            nowe_sal = round(saldo - wplata, 2)
 
-            elif typ_pl == "czesc":
-                nowe_sal = round(saldo - wplata, 2)
-                if ks:
-                    db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
-                else:
-                    db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))", (kid, nowe_sal))
-                db.execute("INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po) VALUES(?,?,datetime('now'),?,?,?,?)",
-                    (g, kid, "wplata", -wplata, "Wplata przy sprzedazy #"+str(sid), nowe_sal))
-                db.commit(); db.close()
-                reszta = round(wplata - kwota_sp, 2)
-                flash("Wplata " + str(round(wplata,2)) + " zl. Saldo: " + str(nowe_sal) + " zl"
-                    + (" | Reszta: " + str(reszta) + " zl" if reszta > 0.01 else ""))
-
+            if ks:
+                db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?",
+                           (nowe_sal, kid))
             else:
-                db.commit(); db.close()
+                db.execute("INSERT INTO konta_saldo(klient_id,saldo_pln,ostatnia_zmiana) VALUES(?,?,datetime('now'))",
+                           (kid, nowe_sal))
+            db.execute(
+                "INSERT INTO konta_transakcje(gospodarstwo_id,klient_id,data,typ,kwota,opis,saldo_po)"
+                " VALUES(?,?,datetime('now'),?,?,?,?)",
+                (g, kid, "wplata", -wplata,
+                 "Wplata " + typ_pl + " za sprzedaz #" + str(sid) + " (" + str(kwota_sp) + " zl)",
+                 nowe_sal))
+            db.commit(); db.close()
+
+            if abs(pozostaje) < 0.01:
+                flash("Zapłacono całość: " + str(wplata) + " zł ✓")
+            elif pozostaje > 0:
+                flash("Wpłacono " + str(wplata) + " zł. Pozostaje do zapłaty: " + str(pozostaje) + " zł")
+            else:
+                flash("Wpłacono " + str(wplata) + " zł. Reszta: " + str(abs(pozostaje)) + " zł")
             return redirect("/sprzedaz")
 
         db.close()
+
         s_kol = "#A32D2D" if saldo > 0.01 else "#3B6D11" if saldo < -0.01 else "#888"
-        s_txt = ("Dlug: " + str(round(saldo,2)) + " zl") if saldo > 0.01 \
-            else ("Nadplata: " + str(round(-saldo,2)) + " zl") if saldo < -0.01 \
-            else "Rozliczony"
+        s_txt = ("Dług: " + str(round(saldo,2)) + " zł") if saldo > 0.01             else ("Nadpłata: " + str(round(-saldo,2)) + " zł") if saldo < -0.01             else "Rozliczony ✓"
 
         html = (
             "<h1>Rozliczenie — " + (sp["kn"] or "klient") + "</h1>"
             "<div class='card' style='max-width:500px;margin:0 auto'>"
             "<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px'>"
             "<div>"
-            "<div style='font-size:12px;color:#888'>Ta sprzedaz</div>"
-            "<div style='font-size:20px;font-weight:700'>" + str(sp["ilosc"]) + " szt. x " + str(sp["cena_szt"]) + " zl</div>"
-            "<div style='font-size:16px;color:#3B6D11;font-weight:600'>= " + str(round(kwota_sp,2)) + " zl</div>"
-            + ("<div style='font-size:11px;color:#888;margin-top:4px'>Zamowienie #" + str(sp["zamowienie_id"]) + "</div>" if sp["zamowienie_id"] else "")
+            "<div style='font-size:12px;color:#888'>Ta sprzedaż</div>"
+            "<div style='font-size:20px;font-weight:700'>" + str(sp["ilosc"]) + " szt. × " + str(sp["cena_szt"]) + " zł</div>"
+            "<div style='font-size:16px;color:#3B6D11;font-weight:600'>= " + str(round(kwota_sp,2)) + " zł należności</div>"
+            + ("<div style='font-size:11px;color:#888;margin-top:4px'>Zamówienie #" + str(sp["zamowienie_id"]) + "</div>" if sp["zamowienie_id"] else "")
             + "</div>"
             "<div style='text-align:right'>"
-            "<div style='font-size:12px;color:#888'>Saldo klienta</div>"
+            "<div style='font-size:12px;color:#888'>Łączne saldo klienta</div>"
             "<div style='font-size:20px;font-weight:700;color:" + s_kol + "'>" + s_txt + "</div>"
             "</div></div>"
             "<hr style='border:none;border-top:1px solid #f0ede4;margin:10px 0'>"
             "<form method='POST'>"
-            "<label style='font-size:13px;font-weight:600'>Typ rozliczenia</label>"
-            "<div style='display:grid;gap:8px;margin:8px 0 12px' id='typ-grid'>"
-            "<label class='rop' style='display:flex;align-items:center;gap:10px;padding:10px 14px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
-            "<input type='radio' name='typ_sprzedazy' value='gotowka' style='width:18px;height:18px'>"
-            "<div><b>Gotówka</b><div style='font-size:12px;color:#888'>Zapłacone teraz — saldo bez zmian</div></div></label>"
-            "<label class='rop' style='display:flex;align-items:center;gap:10px;padding:10px 14px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
-            "<input type='radio' name='typ_sprzedazy' value='przelew' style='width:18px;height:18px'>"
-            "<div><b>Przelew</b><div style='font-size:12px;color:#888'>Zapłacone przelewem — saldo bez zmian</div></div></label>"
-            "<label class='rop' style='display:flex;align-items:center;gap:10px;padding:10px 14px;border:2px solid #534AB7;border-radius:8px;cursor:pointer;background:#f4f3ff'>"
-            "<input type='radio' name='typ_sprzedazy' value='nastepnym_razem' checked style='width:18px;height:18px'>"
-            "<div><b>Następnym razem</b><div style='font-size:12px;color:#888'>Zostaje jako dług: +" + str(round(kwota_sp,2)) + " zł do salda</div></div></label>"
-            "<label class='rop' style='display:flex;align-items:center;gap:10px;padding:10px 14px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
-            "<input type='radio' name='typ_sprzedazy' value='czesc' id='r-czesc' style='width:18px;height:18px'>"
-            "<div style='flex:1'><b>Częściowa wpłata</b>"
-            "<div id='wplata-box' style='margin-top:6px;display:none'>"
-            "<input name='kwota' type='number' step='0.01' min='0' value='" + str(round(kwota_sp,2)) + "'"
-            " style='font-size:18px;text-align:center;width:130px'>"
-            "<span style='font-size:12px;color:#888;margin-left:6px'>zł</span>"
-            "</div></div></label>"
+            # Kwota wplaty - zawsze widoczna
+            "<label style='font-size:13px;font-weight:600'>Ile zapłacił klient (zł)</label>"
+            "<div style='display:flex;align-items:center;gap:8px;margin:8px 0 4px'>"
+            "<input name='kwota_wplaty' type='number' step='0.01' min='0'"
+            " value='" + str(round(kwota_sp,2)) + "'"
+            " style='font-size:24px;text-align:center;font-weight:700;width:160px' required>"
+            "<div style='font-size:13px;color:#888'>z " + str(round(kwota_sp,2)) + " zł należności</div>"
+            "</div>"
+            "<div id='rozlicz-info' style='font-size:12px;color:#888;margin-bottom:12px'>"
+            "Wpisz kwotę którą faktycznie otrzymałeś od klienta</div>"
+            # Typ platnosci
+            "<label style='font-size:13px;font-weight:600'>Sposób płatności</label>"
+            "<div style='display:grid;gap:6px;margin:8px 0 12px'>"
+            "<label style='display:flex;align-items:center;gap:10px;padding:8px 12px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
+            "<input type='radio' name='typ_sprzedazy' value='gotowka' checked style='width:16px;height:16px'>"
+            "<span>💵 Gotówka</span></label>"
+            "<label style='display:flex;align-items:center;gap:10px;padding:8px 12px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
+            "<input type='radio' name='typ_sprzedazy' value='przelew' style='width:16px;height:16px'>"
+            "<span>🏦 Przelew</span></label>"
+            "<label style='display:flex;align-items:center;gap:10px;padding:8px 12px;border:2px solid #e0ddd4;border-radius:8px;cursor:pointer'>"
+            "<input type='radio' name='typ_sprzedazy' value='nastepnym_razem' style='width:16px;height:16px'>"
+            "<span>⏳ Następnym razem (cała kwota zostaje długiem)</span></label>"
             "</div>"
             "<button class='btn bp' style='width:100%;padding:12px;font-size:15px'>Zatwierdź</button>"
             "<a href='/sprzedaz' class='btn bo' style='display:block;text-align:center;padding:10px;margin-top:8px'>Pomiń</a>"
             "</form>"
             "<script>"
-            "function updRop(){"
-            "document.querySelectorAll('.rop').forEach(l=>{"
-            "  var r=l.querySelector('input[type=radio]');"
-            "  l.style.border=r.checked?'2px solid #534AB7':'2px solid #e0ddd4';"
-            "  l.style.background=r.checked?'#f4f3ff':'';"
+            "var _kwota=" + str(round(kwota_sp,2)) + ";"
+            "document.querySelector('[name=kwota_wplaty]').addEventListener('input',function(){"
+            "  var w=parseFloat(this.value)||0,r=_kwota-w;"
+            "  var el=document.getElementById('rozlicz-info');"
+            "  if(Math.abs(r)<0.01) el.innerHTML='<b style=\'color:#3B6D11\'>Zapłacono całość ✓</b>';"
+            "  else if(r>0) el.innerHTML='<span style=\'color:#A32D2D\'>Pozostaje: <b>'+r.toFixed(2)+' zł</b> — trafi do salda jako dług</span>';"
+            "  else el.innerHTML='<span style=\'color:#BA7517\'>Reszta do wydania: <b>'+(-r).toFixed(2)+' zł</b></span>';"
             "});"
-            "document.getElementById('wplata-box').style.display="
-            "  document.getElementById('r-czesc').checked?'block':'none';"
-            "}"
-            "document.querySelectorAll('[name=typ_sprzedazy]').forEach(r=>{"
-            "  r.addEventListener('change',updRop);"
-            "});"
-            "updRop();"
             "</script>"
             "</div>"
         )
