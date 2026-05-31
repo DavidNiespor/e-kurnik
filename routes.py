@@ -1441,6 +1441,164 @@ def register_routes(app):
         return R(html,"ana")
 
 
+    @app.route("/analityka/predykcja")
+    @farm_required
+    def analityka_predykcja():
+        import json as _j
+        g = gid(); db = get_db()
+        pdz      = float(gs("pasza_dzienna_kg","6"))
+        woda_dz  = float(gs("woda_dzienna_l","30"))
+        kur      = db.execute("SELECT COALESCE(SUM(liczba),0) as s FROM stado WHERE gospodarstwo_id=? AND aktywne=1 AND gatunek='nioski'",(g,)).fetchone()["s"] or 1
+
+        # Srednie rzeczywiste z ostatnich 30 i 7 dni
+        def avg_pasza(dni):
+            r = db.execute(
+                "SELECT COALESCE(AVG(pasza_wydana_kg),?) as a FROM produkcja "
+                "WHERE gospodarstwo_id=? AND pasza_wydana_kg>0 AND data>=date('now',?)",
+                (pdz, g, f"-{dni} days")).fetchone()["a"]
+            return float(r or pdz)
+
+        def avg_woda(dni):
+            r = db.execute(
+                "SELECT COALESCE(AVG(litry),?) as a FROM woda_reczna "
+                "WHERE gospodarstwo_id=? AND data>=date('now',?)",
+                (woda_dz, g, f"-{dni} days")).fetchone()["a"]
+            return float(r or woda_dz)
+
+        pasza_avg7  = avg_pasza(7)
+        pasza_avg30 = avg_pasza(30)
+        woda_avg7   = avg_woda(7)
+        woda_avg30  = avg_woda(30)
+
+        koszt_avg30 = float(db.execute(
+            "SELECT COALESCE(SUM(wartosc_total)/30,0) as a FROM wydatki "
+            "WHERE gospodarstwo_id=? AND data>=date('now','-30 days')",(g,)).fetchone()["a"])
+        koszt_avg7 = float(db.execute(
+            "SELECT COALESCE(SUM(wartosc_total)/7,0) as a FROM wydatki "
+            "WHERE gospodarstwo_id=? AND data>=date('now','-7 days')",(g,)).fetchone()["a"])
+
+        pasza_mag = 0.0
+        try: pasza_mag = float(db.execute("SELECT COALESCE(SUM(stan),0) as s FROM stan_magazynu WHERE gospodarstwo_id=?",(g,)).fetchone()["s"] or 0)
+        except Exception: pass
+
+        kos_prev = float(gs("budzet_miesiac","0") or 0)
+        db.close()
+
+        # Pomocnicze
+        def dni_wystarczy(mag, zuzycie_dz):
+            return int(mag / zuzycie_dz) if zuzycie_dz > 0 and mag > 0 else 0
+
+        def kol_diff(v):
+            return "#A32D2D" if v > 0 else "#3B6D11" if v < 0 else "#888"
+
+        def row(label, prev, r7, r30, unit):
+            d7  = round(r7 - prev, 2)
+            d30 = round(r30 - prev, 2)
+            return (
+                "<tr>"
+                f"<td style='font-weight:500'>{label}</td>"
+                f"<td style='text-align:right;color:#534AB7'>{prev} {unit}</td>"
+                f"<td style='text-align:right;font-weight:600'>{round(r7,2)} {unit}</td>"
+                f"<td style='text-align:right;color:{kol_diff(d7)};font-weight:600'>"
+                + (("+" if d7>0 else "") + str(d7)) + f" {unit}</td>"
+                f"<td style='text-align:right;font-weight:600'>{round(r30,2)} {unit}</td>"
+                f"<td style='text-align:right;color:{kol_diff(d30)};font-weight:600'>"
+                + (("+" if d30>0 else "") + str(d30)) + f" {unit}</td>"
+                "</tr>"
+            )
+
+        # Tabela dzienna
+        tab = (
+            "<div class='card' style='margin-bottom:12px;overflow-x:auto'>"
+            "<b>Zużycie dzienne — przewidywane vs rzeczywiste</b>"
+            "<table style='font-size:13px;margin-top:10px;width:100%'><thead><tr>"
+            "<th>Parametr</th>"
+            "<th style='text-align:right;color:#534AB7'>Przewidywane</th>"
+            "<th style='text-align:right'>Rzecz. 7d</th><th style='text-align:right'>Różnica 7d</th>"
+            "<th style='text-align:right'>Rzecz. 30d</th><th style='text-align:right'>Różnica 30d</th>"
+            "</tr></thead><tbody>"
+            + row("Pasza / dzień", round(pdz,2), pasza_avg7, pasza_avg30, "kg")
+            + row("Woda / dzień", round(woda_dz,1), woda_avg7, woda_avg30, "L")
+            + row("Koszty / dzień", round(kos_prev/30,2) if kos_prev > 0 else 0, koszt_avg7, koszt_avg30, "zł")
+            + "</tbody></table></div>"
+        )
+
+        # Predykcja na 7/30/90 dni
+        def pred_block(dni_list):
+            rows = ""
+            for dni in dni_list:
+                rows += (
+                    f"<tr><td style='font-weight:500'>{dni} dni</td>"
+                    f"<td style='text-align:right;color:#534AB7'>{round(pdz*dni,1)} kg</td>"
+                    f"<td style='text-align:right'>{round(pasza_avg7*dni,1)} kg</td>"
+                    f"<td style='text-align:right'>{round(pasza_avg30*dni,1)} kg</td>"
+                    f"<td style='text-align:right;color:#185FA5'>{round(woda_dz*dni,0):.0f} L</td>"
+                    f"<td style='text-align:right'>{round(woda_avg30*dni,0):.0f} L</td>"
+                    f"<td style='text-align:right;color:#D85A30'>{round(kos_prev/30*dni,2) if kos_prev>0 else '—'} zł</td>"
+                    f"<td style='text-align:right'>{round(koszt_avg30*dni,2)} zł</td>"
+                    "</tr>"
+                )
+            return (
+                "<div class='card' style='margin-bottom:12px;overflow-x:auto'>"
+                "<b>Zapotrzebowanie na kolejne dni</b>"
+                "<table style='font-size:13px;margin-top:10px;width:100%'><thead><tr>"
+                "<th>Okres</th>"
+                "<th style='text-align:right;color:#534AB7'>Pasza (plan)</th>"
+                "<th style='text-align:right'>Pasza (7d avg)</th>"
+                "<th style='text-align:right'>Pasza (30d avg)</th>"
+                "<th style='text-align:right;color:#185FA5'>Woda (plan)</th>"
+                "<th style='text-align:right'>Woda (30d avg)</th>"
+                "<th style='text-align:right;color:#D85A30'>Koszty (budżet)</th>"
+                "<th style='text-align:right'>Koszty (30d avg)</th>"
+                "</tr></thead><tbody>" + rows + "</tbody></table></div>"
+            )
+
+        # Kafelki wystarczalności
+        def mag_tile(label, mag_kg, zuzycie_plan, zuzycie_rzecz, unit):
+            d_plan  = dni_wystarczy(mag_kg, zuzycie_plan)
+            d_rzecz = dni_wystarczy(mag_kg, zuzycie_rzecz)
+            kol_p = "#A32D2D" if d_plan < 7 else "#BA7517" if d_plan < 14 else "#3B6D11"
+            kol_r = "#A32D2D" if d_rzecz < 7 else "#BA7517" if d_rzecz < 14 else "#3B6D11"
+            return (
+                "<div class='card stat'>"
+                f"<div class='v' style='color:{kol_r}'>{d_rzecz}d</div>"
+                f"<div class='l'>{label} starczy</div>"
+                f"<div class='s'>{round(mag_kg,1)} {unit} w mag.</div>"
+                f"<div class='s'>plan: {d_plan}d / rzecz: {d_rzecz}d</div>"
+                "</div>"
+            )
+
+        tiles = (
+            "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:12px'>"
+            + (mag_tile("Pasza", pasza_mag, pdz, pasza_avg30, "kg") if pasza_mag > 0 else "")
+            + "<div class='card stat'>"
+            f"<div class='v' style='color:#534AB7'>{round(pasza_avg30,2)} kg</div>"
+            f"<div class='l'>Pasza śr./dzień</div>"
+            f"<div class='s'>plan: {pdz} kg | 7d: {round(pasza_avg7,2)} kg</div></div>"
+            + "<div class='card stat'>"
+            f"<div class='v' style='color:#185FA5'>{round(woda_avg30,1)} L</div>"
+            f"<div class='l'>Woda śr./dzień</div>"
+            f"<div class='s'>plan: {woda_dz} L | 7d: {round(woda_avg7,1)} L</div></div>"
+            + ("<div class='card stat'>"
+               f"<div class='v' style='color:#D85A30'>{round(koszt_avg30,2)} zł</div>"
+               f"<div class='l'>Koszty śr./dzień</div>"
+               f"<div class='s'>7d avg: {round(koszt_avg7,2)} zł</div></div>" if koszt_avg30 > 0 else "")
+            + "</div>"
+        )
+
+        html = (
+            "<h1>Predykcja</h1>"
+            + tiles
+            + tab
+            + pred_block([7, 14, 30, 60, 90])
+            + "<div style='font-size:12px;color:#888;margin-top:8px'>"
+            "Przewidywane = wartości z ustawień farmy. "
+            "Rzeczywiste = średnia z ostatnich 7/30 dni rzeczywistego zużycia.</div>"
+            + "<a href='/analityka' class='btn bo bsm' style='margin-top:12px'>← Wykresy</a>"
+        )
+        return R(html, "ana")
+
+
     # ─── PASZA ROCZNE + ANALITYKA ─────────────────────────────────────────────
     @app.route("/pasza/receptura/<int:rid>/sezon-form", methods=["GET","POST"])
     @farm_required
