@@ -115,11 +115,11 @@ def register_sprzedaz(app):
 
             sid = db.execute("SELECT MAX(id) FROM sprzedaz_szczegol WHERE gospodarstwo_id=?", (g,)).fetchone()[0]
             db.commit(); db.close()
-            # Pokaz rozliczenie gdy klient i sprzedaz z kwota > 0 lub nastepnym_razem
-            if kid and (kwota > 0 or typ == "nastepnym_razem"):
-                flash(flash_msg)
-                return redirect("/sprzedaz/rozlicz/" + str(sid))
             flash(flash_msg)
+            # Przekieruj na rozliczenie TYLKO gdy klient i NIE rozliczono juz w formularzu
+            juz_rozliczono = (wplata > 0 or rozlicz0)
+            if kid and not juz_rozliczono and (kwota > 0 or typ == "nastepnym_razem"):
+                return redirect("/sprzedaz/rozlicz/" + str(sid))
             return redirect(request.referrer or "/sprzedaz")
 
         # ── GET ───────────────────────────────────────────────────────────
