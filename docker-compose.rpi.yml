@@ -1,0 +1,7 @@
+# Nakladka dla Raspberry Pi — dodaje dostep do GPIO.
+# Uzycie (CLI):  docker compose -f docker-compose.yml -f docker-compose.rpi.yml up -d
+# W Portainer: wklej zawartosc docker-compose.yml, a w sekcji ferma > devices dopisz /dev/gpiochip0
+services:
+  ferma:
+    devices:
+      - /dev/gpiochip0:/dev/gpiochip0

@@ -238,6 +238,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
         <a href="/konto">&#x1F464; Moje konto</a>
         <a href="/wybierz-gospodarstwo">&#x1F3E0; Zmie&#324; farm&#281;</a>
         <a href="/ustawienia/farma">&#x2699;&#xFE0F; Ustawienia farmy</a>
+        <a href="/backup/db">&#x1F4BE; Import / Export bazy</a>
         <a href="/import/xlsx">&#x1F4C2; Import xlsx</a>
         {% if rola == 'superadmin' %}
         <div class="nd-sep"></div>
@@ -295,6 +296,7 @@ code{background:#f0ede4;padding:2px 5px;border-radius:4px;font-size:12px}
       <a href="/urzadzenia" class="{{ 'on' if p=='urz' }}" onclick="drClose()">Urz&#261;dzenia</a>
       <a href="/supla" onclick="drClose()">Supla</a>
       <a href="/ustawienia/farma" onclick="drClose()">Ustawienia</a>
+      <a href="/backup/db" onclick="drClose()">Import / Export bazy</a>
     </div>
   </div>
 
@@ -2932,6 +2934,8 @@ if register_supla_oauth_routes:
 register_produkcja(app)
 register_sprzedaz(app)
 register_backup(app)
+from backup_db_routes import register_db_backup
+register_db_backup(app)
 
 # ─── START ────────────────────────────────────────────────────────────────────
 @app.route("/admin/farm/<int:fid>/usun", methods=["POST"])

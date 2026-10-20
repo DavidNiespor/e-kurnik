@@ -1,12 +1,15 @@
 # docker-compose.yml — Portainer Stack
-# Zmienne środowiskowe do ustawienia w Portainer → Stack → Environment variables:
-#   GH_IMAGE                 = ghcr.io/TWOJ_USER/ferma-jaj:latest
-#   SECRET_KEY               = losowy ciąg 32+ znaków
-#   CLOUDFLARE_TUNNEL_TOKEN  = token z Cloudflare Zero Trust
+# Działa na RPi (arm64) i VPS/PC (amd64) — obraz multi-platform
+#
+# Zmienne środowiskowe (ustaw w Portainer → Stack → Environment):
+#   SECRET_KEY              — losowy string 32+ znaków (openssl rand -hex 32)
+#   CLOUDFLARE_TUNNEL_TOKEN — token z Cloudflare Zero Trust
+#   GH_IMAGE                — opcjonalnie: ghcr.io/davidniespor/e-kurnik:latest
 
 services:
+
   ferma:
-    image: ${GH_IMAGE:-ghcr.io/changeme/ferma-jaj:latest}
+    image: ${GH_IMAGE:-ghcr.io/davidniespor/e-kurnik:latest}
     container_name: ferma_app
     restart: unless-stopped
     expose:
@@ -15,9 +18,8 @@ services:
       - ferma_data:/data
     environment:
       - FERMA_DATA_DIR=/data
-      - SECRET_KEY=${SECRET_KEY:-zmien-mnie}
+      - SECRET_KEY=${SECRET_KEY:-zmien-to-na-produkcji}
       - TZ=Europe/Warsaw
-    
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -54,18 +56,6 @@ services:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_ROLLING_RESTART=true
       - TZ=Europe/Warsaw
-    networks:
-      - ferma_net
-
-  portainer_agent:
-    image: portainer/agent:latest
-    container_name: ferma_portainer_agent
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/docker/volumes:/var/lib/docker/volumes
-    expose:
-      - "9001"
     networks:
       - ferma_net
 

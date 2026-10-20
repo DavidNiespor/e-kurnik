@@ -1,26 +1,30 @@
+# Dockerfile — jeden obraz dla RPi (arm64) i PC/VPS (amd64)
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl curl \
-    && rm -rf /var/lib/apt/lists/*
-
+ARG TARGETARCH
 WORKDIR /app
 
-# Zależności najpierw (cache warstwy)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Wszystkie pliki .py bezpośrednio (bez podkatalogu app/)
-COPY *.py .
+# GPIO tylko na arm64 (RPi) - best effort, brak biblioteki nie psuje obrazu
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      pip install --no-cache-dir lgpio || echo "lgpio niedostepne - GPIO lokalne wylaczone"; \
+    fi
 
-RUN mkdir -p /data && chmod 777 /data
+COPY *.py ./
+RUN mkdir -p /data
 
-ENV FERMA_DATA_DIR=/data
-ENV PYTHONUNBUFFERED=1
+ENV FERMA_DATA_DIR=/data \
+    PYTHONUNBUFFERED=1
 
-# Zwiększony start_period bo pandas/openpyxl wolno się ładują
+EXPOSE 5000
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-EXPOSE 5000
-CMD ["python3", "app.py"]
+CMD ["python", "app.py"]

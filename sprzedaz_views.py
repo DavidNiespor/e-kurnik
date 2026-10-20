@@ -79,22 +79,37 @@ def register_sprzedaz(app):
                 kwota = max(0, round(kwota - rabat, 2))
                 db.execute("UPDATE sprzedaz_szczegol SET wartosc=? WHERE id=(SELECT MAX(id) FROM sprzedaz_szczegol WHERE gospodarstwo_id=?)", (kwota, g))
 
-            # Wpłata klienta — zaktualizuj saldo
+            # Wpłata klienta — pole "Ile dał klient" przy zakupie gotówkowym
+            # Liczy nadplate/nedoplate WZGLEDEM TEJ sprzedazy, nie calego salda
             wplata = float(request.form.get("wplata_klienta", 0) or 0)
             rozlicz0 = request.form.get("rozlicz_do_zera") == "1"
             if kid and (wplata > 0 or rozlicz0):
                 from datetime import datetime
                 ks2 = db.execute("SELECT saldo_pln FROM konta_saldo WHERE klient_id=?", (kid,)).fetchone()
                 stare_sal = float(ks2["saldo_pln"] if ks2 else 0)
-                # stare_sal juz zawiera dług z tej sprzedazy (dodany wyżej)
-                # Wpłata zmniejsza saldo
-                if rozlicz0:
-                    nowe_sal = 0.0
-                    if wplata <= 0: wplata = max(0, stare_sal)
-                    reszta = round(wplata - stare_sal, 2)
+
+                if typ == "nastepnym_razem":
+                    # stare_sal JUZ zawiera dlug z tej sprzedazy (dodany linia wyzej)
+                    if rozlicz0:
+                        nowe_sal = 0.0
+                        if wplata <= 0: wplata = max(0, stare_sal)
+                        reszta = round(wplata - stare_sal, 2)
+                    else:
+                        nowe_sal = round(stare_sal - wplata, 2)
+                        reszta = round(wplata - stare_sal, 2)
                 else:
-                    nowe_sal = round(stare_sal - wplata, 2)
-                    reszta = round(wplata - stare_sal, 2)
+                    # gotowka/przelew/z_salda — dlug NIE byl dodany do salda
+                    # Wplata jest porownywana do KWOTY TEJ SPRZEDAZY, nie do stare_sal
+                    if rozlicz0:
+                        # Rozlicz do zera = splac caly dotychczasowy dlug + ta sprzedaz juz oplacona
+                        nowe_sal = 0.0
+                        if wplata <= 0: wplata = max(0, stare_sal)
+                        reszta = round(wplata - stare_sal, 2)
+                    else:
+                        nadplata_z_tej_sprzedazy = round(wplata - kwota, 2)
+                        # Nadplata/niedoplata z tej transakcji modyfikuje istniejace saldo
+                        nowe_sal = round(stare_sal - nadplata_z_tej_sprzedazy, 2)
+                        reszta = nadplata_z_tej_sprzedazy
                 if ks2:
                     db.execute("UPDATE konta_saldo SET saldo_pln=?,ostatnia_zmiana=datetime('now') WHERE klient_id=?", (nowe_sal, kid))
                 else:
@@ -116,9 +131,12 @@ def register_sprzedaz(app):
             sid = db.execute("SELECT MAX(id) FROM sprzedaz_szczegol WHERE gospodarstwo_id=?", (g,)).fetchone()[0]
             db.commit(); db.close()
             flash(flash_msg)
-            # Przekieruj na rozliczenie TYLKO gdy klient i NIE rozliczono juz w formularzu
+            # Redirect na rozliczenie TYLKO gdy:
+            # - jest klient
+            # - typ = nastepnym_razem (dług dodany, trzeba wybrać jak płaci)
+            # - NIE rozliczono już w formularzu
             juz_rozliczono = (wplata > 0 or rozlicz0)
-            if kid and not juz_rozliczono and (kwota > 0 or typ == "nastepnym_razem"):
+            if kid and not juz_rozliczono and typ == "nastepnym_razem":
                 return redirect("/sprzedaz/rozlicz/" + str(sid))
             return redirect(request.referrer or "/sprzedaz")
 
@@ -935,12 +953,26 @@ def register_sprzedaz(app):
             import json, base64, urllib.request, urllib.parse
 
             creds = json.loads(gs_creds)
-            # Uzyj service account token
-            import google_auth
-            token = google_auth.get_token(creds)
+            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request as _GReq
+            _cred = service_account.Credentials.from_service_account_info(
+                creds, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            _cred.refresh(_GReq())
+            token = _cred.token
 
             headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json"}
+
+            # Utworz brakujace zakladki (Sprzedaz, Produkcja) - blad "juz istnieje" ignorujemy
+            for _tab in ("Sprzedaz", "Produkcja"):
+                try:
+                    _body = json.dumps({"requests": [{"addSheet": {"properties": {"title": _tab}}}]}).encode()
+                    _rq = urllib.request.Request(
+                        f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}:batchUpdate",
+                        data=_body, headers=headers, method="POST")
+                    urllib.request.urlopen(_rq)
+                except Exception:
+                    pass
 
             def sheets_clear_and_write(sheet_name, header, rows_data):
                 url_clear = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{urllib.parse.quote(sheet_name)}!A1:Z10000:clear"
@@ -962,7 +994,7 @@ def register_sprzedaz(app):
 
             flash("Zsynchronizowano " + str(len(sprzedaz)) + " wpisów sprzedaży i " + str(len(produkcja)) + " dni produkcji z Google Sheets ✓")
         except ImportError:
-            flash("Brak biblioteki google-auth. Użyj eksportu CSV.")
+            flash("Brak biblioteki google-auth w obrazie. Użyj eksportu CSV.")
         except Exception as e:
             flash("Błąd synchronizacji: " + str(e))
 
